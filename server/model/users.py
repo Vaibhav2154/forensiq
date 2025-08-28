@@ -7,6 +7,10 @@ class UserBase(BaseModel):
 class UserCreate(UserBase):
     password: str = Field(...)
 
+class LoginRequest(BaseModel):
+    username: str = Field(...)
+    password: str = Field(...)
+
 class UserUpdate(BaseModel):
     email: str | None = None
     username: str | None = None
