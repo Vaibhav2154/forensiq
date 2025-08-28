@@ -1,6 +1,11 @@
-def main():
-    print("Hello from server!")
+from fastapi import FastAPI
+from routers import auth, users
 
+app = FastAPI()
 
-if __name__ == "__main__":
-    main()
+app.include_router(auth.router)
+app.include_router(users.router)
+
+@app.get('/')
+async def read_root():
+    return {"Hello": "World"}
