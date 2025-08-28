@@ -1,7 +1,7 @@
 from fastapi import APIRouter, HTTPException,UploadFile, File
 from pydantic import BaseModel
-from app.core import orchestrator
-from app.services import ai_clients,data_prepping
+from core import orchestrator
+from services import ai_clients,data_prepping
 
 router = APIRouter()
 
@@ -44,7 +44,7 @@ async def analyze_log_file(file: UploadFile = File(...)):
     log_lines = raw_log_content.splitlines()
 
     # 1. Use your Data Prep script to clean and structure the logs
-    processed_logs = data_prepper.process_logs(log_lines)
+    processed_logs = data_prepping.process_logs(log_lines)
     
     # 2. Pipeline each processed log through the analysis orchestrator
     full_report = []
