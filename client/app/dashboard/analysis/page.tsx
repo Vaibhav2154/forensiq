@@ -1,6 +1,9 @@
 'use client'
 import React, { useState, useEffect } from 'react'
+import { useRouter } from 'next/navigation'
 import Navbar from '../../../components/navbar'
+import ToastNotification from '../../../components/toast-notification'
+import { useToast } from '../../../hooks/useToast'
 
 interface ThreatTechnique {
   technique_id: string;
@@ -20,6 +23,8 @@ interface AnalysisResponse {
 }
 
 const AnalysisPage = () => {
+  const router = useRouter()
+  const { toasts, removeToast, success, error: showError } = useToast()
   const [logs, setLogs] = useState('');
   const [enhanceWithAI, setEnhanceWithAI] = useState(true);
   const [maxResults, setMaxResults] = useState(5);
@@ -30,6 +35,7 @@ const AnalysisPage = () => {
   const [terminalText, setTerminalText] = useState('');
   const [showCursor, setShowCursor] = useState(true);
   const [isMobile, setIsMobile] = useState(false);
+  const [showVisualizationButton, setShowVisualizationButton] = useState(false);
 
   const fullTerminalText = '> LOG_ANALYZER.EXE --MODE=THREAT_DETECTION --FRAMEWORK=MITRE';
 
@@ -95,11 +101,29 @@ const AnalysisPage = () => {
 
       const result: AnalysisResponse = await response.json();
       setAnalysis(result);
+      
+      // Store analysis result in localStorage for visualization page
+      localStorage.setItem('latestAnalysis', JSON.stringify(result));
+      
+      // Show visualization button after successful analysis
+      setShowVisualizationButton(true);
+      
+      // Show success notification
+      success(`Analysis completed! Found ${result.matched_techniques.length} MITRE ATT&CK techniques.`);
     } catch (err) {
-      setError(err instanceof Error ? err.message : 'Failed to analyze logs');
+      const errorMessage = err instanceof Error ? err.message : 'Failed to analyze logs';
+      setError(errorMessage);
+      showError(errorMessage);
     } finally {
       setLoading(false);
     }
+  };
+
+  const navigateToVisualization = () => {
+    success('Navigating to enhanced visualization dashboard...');
+    setTimeout(() => {
+      router.push('/dashboard/visualization');
+    }, 1000);
   };
 
   const formatMarkdown = (text: string) => {
@@ -137,6 +161,8 @@ const AnalysisPage = () => {
 
   return (
     <div className='relative bg-black min-h-screen w-full text-white overflow-x-hidden font-mono'>
+      <ToastNotification toasts={toasts} removeToast={removeToast} />
+      
       {/* Terminal grid overlay */}
       <div 
         className="absolute inset-0 opacity-5"
@@ -286,6 +312,14 @@ const AnalysisPage = () => {
                     <div className="bg-green-900/30 border border-green-500/30 px-2 sm:px-3 py-1 text-green-400 text-xs sm:text-sm">
                       [STATUS: COMPLETE]
                     </div>
+                    {showVisualizationButton && (
+                      <button
+                        onClick={navigateToVisualization}
+                        className="bg-purple-900/30 border border-purple-500/30 hover:border-purple-400 hover:bg-purple-500/20 px-2 sm:px-3 py-1 text-purple-400 hover:text-purple-300 text-xs sm:text-sm transition-colors cursor-pointer"
+                      >
+                        [VIEW_ENHANCED_VISUALIZATION]
+                      </button>
+                    )}
                   </div>
                 </div>
 
