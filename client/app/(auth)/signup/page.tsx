@@ -30,6 +30,7 @@ const ProfessionalTerminalSignUp: React.FC = () => {
   const [showPrompt, setShowPrompt] = useState(false);
   const [errors, setErrors] = useState<string[]>([]);
   const terminalRef = useRef<HTMLDivElement>(null);
+  const [client,setClient] = useState(false);
   const inputRef = useRef<HTMLInputElement>(null);
 
   
@@ -43,6 +44,9 @@ const router = useRouter();
     });
   };
 
+  useEffect(()=>{
+    setClient(true);
+  },[])
   const addTerminalLine = (text: string, type: TerminalLine['type'] = 'system') => {
     const newLine: TerminalLine = {
       id: Date.now() + Math.random(),
@@ -197,7 +201,7 @@ const router = useRouter();
     
     */
    console.log(data)
-    fetch('https://39619b5d65b6.ngrok-free.app/register', {
+    fetch(`${process.env.NEXT_PUBLIC_API_BASE_URL}/register`, {
       method: 'POST',
       headers: {
         'Content-Type': 'application/json',
@@ -323,6 +327,7 @@ const router = useRouter();
   };
 
   return (
+    client &&
     <div className="h-screen w-screen bg-black text-green-400 font-mono overflow-hidden flex flex-col">
       {/* Terminal Header */}
       <div className="flex items-center justify-between border-b border-gray-700 px-4 py-2 bg-gray-900 flex-shrink-0">

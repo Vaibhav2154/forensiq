@@ -14,6 +14,7 @@ const Navbar = () => {
     { name: 'DASHBOARD.SYS', href: '/dashboard', icon: '📊', shortName: 'DASH' },
     { name: 'MITRE_ATTACK.DB', href: '/dashboard/mitre', icon: '🛡️', shortName: 'MITRE' },
     { name: 'ANALYSIS.EXE', href: '/dashboard/analysis', icon: '🔍', shortName: 'ANALYZE' },
+    { name: 'CLI_GUIDE', href: '/dashboard/cliguide', icon: '🖥️', shortName: 'CLI' }
   ]
 
   useEffect(() => {
@@ -94,7 +95,7 @@ const Navbar = () => {
 
             {/* User Icon */}
             <div className='w-6 h-6 sm:w-8 sm:h-8 bg-black border border-green-500/50 flex items-center justify-center'>
-              <span className='text-green-400 text-xs sm:text-sm' onClick={()=>router.push('/profileupdate')}>👤</span>
+              <span className='text-green-400 text-xs sm:text-sm hover:cursor-pointer' onClick={()=>router.push('/profileupdate')}>👤</span>
             </div>
 
             {/* Mobile Menu Button */}

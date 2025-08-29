@@ -22,6 +22,15 @@ class Settings(BaseSettings):
   MAX_LOG_LENGTH: str = "10000"
   MAX_RESULTS: str = "5"
   
+  # AWS settings (optional)
+  AWS_ACCESS_KEY_ID: str = ""
+  AWS_SECRET_ACCESS_KEY: str = ""
+  AWS_REGION: str = "us-east-1"
+  AWS_SESSION_TOKEN: str = ""
+  
+  # Encryption settings
+  ENCRYPTION_MASTER_KEY: str = "default-encryption-key-change-in-production"
+  
   model_config = SettingsConfigDict(env_file=".env")
 
 

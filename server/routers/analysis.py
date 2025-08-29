@@ -1,10 +1,13 @@
-from fastapi import APIRouter, HTTPException
-from typing import Dict, Any
+from fastapi import APIRouter, HTTPException, Depends
+from typing import Dict, Any, List
 import time
 
 from pydantic import BaseModel
 from model.logs_model import LogAnalysisRequest, LogAnalysisResponse, AttackTechnique
+from model.analysis_model import AnalysisHistoryItem, UserAnalyticsStats
 from services import GeminiService, ChromaDBService
+from services.analysis_storage_service import analysis_storage_service
+from routers.auth import get_current_user
 from core import logger
 
 router = APIRouter(prefix="/api/v1", tags=["Log Analysis"])
@@ -20,7 +23,7 @@ def set_services(gemini: GeminiService, chromadb: ChromaDBService):
     chromadb_service = chromadb
 
 @router.post("/analyze", response_model=LogAnalysisResponse)
-async def analyze_logs(request: LogAnalysisRequest) -> LogAnalysisResponse:
+async def analyze_logs(request: LogAnalysisRequest, current_user: dict = Depends(get_current_user)) -> LogAnalysisResponse:
     """
     Analyze system logs using AI summarization and MITRE ATT&CK technique matching.
     
@@ -97,12 +100,26 @@ async def analyze_logs(request: LogAnalysisRequest) -> LogAnalysisResponse:
         
         logger.info(f"Analysis completed in {processing_time:.2f}ms with {len(matched_techniques)} matches")
         
-        return LogAnalysisResponse(
+        response = LogAnalysisResponse(
             summary=summary,
             matched_techniques=matched_techniques,
             enhanced_analysis=enhanced_analysis,
             processing_time_ms=processing_time
         )
+        
+        # Store the analysis result in encrypted format
+        try:
+            analysis_id = await analysis_storage_service.store_analysis_result(
+                user_id=current_user["username"],
+                request=request,
+                response=response
+            )
+            logger.info(f"Stored analysis result with ID {analysis_id} for user {current_user['username']}")
+        except Exception as e:
+            logger.error(f"Failed to store analysis result: {str(e)}")
+            # Continue without failing the request - storage is not critical for the response
+        
+        return response
         
     except HTTPException:
         raise
@@ -165,4 +182,152 @@ async def get_database_stats() -> Dict[str, Any]:
         raise HTTPException(
             status_code=500,
             detail=f"Failed to get stats: {str(e)}"
+        )
+
+@router.get("/history", response_model=List[AnalysisHistoryItem])
+async def get_analysis_history(
+    limit: int = 10, 
+    offset: int = 0,
+    current_user: dict = Depends(get_current_user)
+) -> List[AnalysisHistoryItem]:
+    """
+    Get user's analysis history.
+    
+    Args:
+        limit: Maximum number of results to return (default: 10, max: 50)
+        offset: Number of results to skip for pagination (default: 0)
+        current_user: Current authenticated user
+        
+    Returns:
+        List of analysis history items (without sensitive data)
+    """
+    try:
+        # Validate parameters
+        if limit > 50:
+            limit = 50
+        if limit < 1:
+            limit = 10
+        if offset < 0:
+            offset = 0
+            
+        history = await analysis_storage_service.get_user_analysis_history(
+            user_id=current_user["username"],
+            limit=limit,
+            offset=offset
+        )
+        
+        logger.info(f"Retrieved {len(history)} history items for user {current_user['username']}")
+        return history
+        
+    except Exception as e:
+        logger.error(f"Error getting analysis history: {str(e)}")
+        raise HTTPException(
+            status_code=500,
+            detail=f"Failed to get analysis history: {str(e)}"
+        )
+
+@router.get("/history/{analysis_id}", response_model=LogAnalysisResponse)
+async def get_analysis_result(
+    analysis_id: str,
+    current_user: dict = Depends(get_current_user)
+) -> LogAnalysisResponse:
+    """
+    Get a specific analysis result by ID.
+    
+    Args:
+        analysis_id: The analysis ID to retrieve
+        current_user: Current authenticated user
+        
+    Returns:
+        Complete analysis result with decrypted data
+    """
+    try:
+        result = await analysis_storage_service.get_analysis_result(
+            user_id=current_user["username"],
+            analysis_id=analysis_id
+        )
+        
+        if not result:
+            raise HTTPException(
+                status_code=404,
+                detail="Analysis result not found"
+            )
+            
+        logger.info(f"Retrieved analysis result {analysis_id} for user {current_user['username']}")
+        return result
+        
+    except HTTPException:
+        raise
+    except Exception as e:
+        logger.error(f"Error getting analysis result {analysis_id}: {str(e)}")
+        raise HTTPException(
+            status_code=500,
+            detail=f"Failed to get analysis result: {str(e)}"
+        )
+
+@router.delete("/history/{analysis_id}")
+async def delete_analysis_result(
+    analysis_id: str,
+    current_user: dict = Depends(get_current_user)
+) -> Dict[str, str]:
+    """
+    Delete a specific analysis result.
+    
+    Args:
+        analysis_id: The analysis ID to delete
+        current_user: Current authenticated user
+        
+    Returns:
+        Success confirmation
+    """
+    try:
+        success = await analysis_storage_service.delete_analysis_result(
+            user_id=current_user["username"],
+            analysis_id=analysis_id
+        )
+        
+        if not success:
+            raise HTTPException(
+                status_code=404,
+                detail="Analysis result not found"
+            )
+            
+        logger.info(f"Deleted analysis result {analysis_id} for user {current_user['username']}")
+        return {"message": "Analysis result deleted successfully"}
+        
+    except HTTPException:
+        raise
+    except Exception as e:
+        logger.error(f"Error deleting analysis result {analysis_id}: {str(e)}")
+        raise HTTPException(
+            status_code=500,
+            detail=f"Failed to delete analysis result: {str(e)}"
+        )
+
+@router.get("/analytics", response_model=UserAnalyticsStats)
+async def get_user_analytics(
+    current_user: dict = Depends(get_current_user)
+) -> UserAnalyticsStats:
+    """
+    Get user analytics and statistics.
+    
+    Args:
+        current_user: Current authenticated user
+        
+    Returns:
+        User analytics statistics
+    """
+    try:
+        analytics = await analysis_storage_service.get_user_analytics(
+            user_id=current_user["username"]
+        )
+        
+        logger.info(f"Retrieved analytics for user {current_user['username']}")
+        return analytics
+        
+    except Exception as e:
+        logger.error(f"Error getting user analytics: {str(e)}")
+        raise HTTPException(
+            status_code=500,
+            detail=f"Failed to get analytics: {str(e)}"
         )

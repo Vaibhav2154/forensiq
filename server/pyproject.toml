@@ -17,6 +17,7 @@ dependencies = [
     "google-generativeai",
     "sentence-transformers",
     "chromadb>=1.0.20",
+    "cryptography>=45.0.6",
     "schedule>=1.2.2",
 ]
 
@@ -25,3 +26,4 @@ dependencies = [
 where = ["."]
 # Explicitly include your package directories
 include = ["core*", "model*", "routers*", "services*"]
+

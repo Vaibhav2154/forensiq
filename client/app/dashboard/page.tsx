@@ -59,13 +59,23 @@ const DashboardPage = () => {
       stats: 'REALTIME_ANALYSIS'
     },
     {
+      title: 'THREAT_VISUALIZATION.EXE',
+      shortTitle: 'VISUALIZATION',
+      description: 'Enhanced threat visualization dashboard with advanced analytics',
+      shortDescription: 'Enhanced threat visualization dashboard',
+      icon: '�',
+      href: '/dashboard/visualization',
+      color: 'purple',
+      stats: 'INTERACTIVE_CHARTS'
+    },
+    {
       title: 'MITRE_ATTACK.DB',
       shortTitle: 'MITRE_ATTACK',
       description: 'Comprehensive threat intelligence and attack technique database',
       shortDescription: 'Threat intelligence and attack technique database',
       icon: '🛡️',
       href: '/dashboard/mitre',
-      color: 'purple',
+      color: 'green',
       stats: 'ENTERPRISE_TECH'
     },
     {
@@ -76,16 +86,6 @@ const DashboardPage = () => {
       icon: '⚠️',
       href: '/dashboard/threats',
       color: 'red',
-      stats: 'COMING_SOON'
-    },
-    {
-      title: 'SEC_REPORTS.OUT',
-      shortTitle: 'SEC_REPORTS',
-      description: 'Comprehensive security analysis and incident reports',
-      shortDescription: 'Security analysis and incident reports',
-      icon: '📊',
-      href: '/dashboard/reports',
-      color: 'green',
       stats: 'COMING_SOON'
     }
   ]
@@ -98,28 +98,31 @@ const DashboardPage = () => {
       timestamp: '2025-08-29 05:08:30',
       shortTimestamp: '08-29 05:08',
       techniques: 5,
+      hasVisualization: true,
       severity: 'Critical',
       status: 'Completed'
     },
     {
       id: 2,
-      type: 'Login Anomaly',
-      shortType: 'Login Anomaly',
-      timestamp: '2025-08-29 04:15:22',
-      shortTimestamp: '08-29 04:15',
+      type: 'Privilege Escalation',
+      shortType: 'Priv Escalation',
+      timestamp: '2025-08-29 04:45:12',
+      shortTimestamp: '08-29 04:45',
       techniques: 3,
+      hasVisualization: true,
       severity: 'High',
       status: 'Completed'
     },
     {
       id: 3,
-      type: 'Network Intrusion',
-      shortType: 'Net Intrusion',
-      timestamp: '2025-08-29 03:42:11',
-      shortTimestamp: '08-29 03:42',
+      type: 'Lateral Movement',
+      shortType: 'Lateral Move',
+      timestamp: '2025-08-29 03:22:18',
+      shortTimestamp: '08-29 03:22',
       techniques: 7,
+      hasVisualization: true,
       severity: 'Critical',
-      status: 'In Progress'
+      status: 'Completed'
     }
   ]
 
@@ -309,6 +312,11 @@ const DashboardPage = () => {
                   <span className="text-green-400 whitespace-nowrap">
                     [{analysis.status.toUpperCase()}]
                   </span>
+                  {analysis.hasVisualization && (
+                    <Link href="/dashboard/visualization" className="px-2 py-1 bg-purple-900/30 border border-purple-500/30 hover:border-purple-400 hover:bg-purple-500/20 text-purple-400 hover:text-purple-300 transition-colors text-xs whitespace-nowrap">
+                      [VIEW_VIZ]
+                    </Link>
+                  )}
                 </div>
               </div>
             ))}
