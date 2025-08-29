@@ -22,6 +22,7 @@ const ProfessionalTerminalLogin: React.FC = () => {
   const [isAuthenticated, setIsAuthenticated] = useState(false);
   const [loginStep, setLoginStep] = useState<'username' | 'password' | 'complete'>('username');
   const [formData, setFormData] = useState<LoginFormData>({ username: '', password: '' });
+  const [client, setClient] = useState(false);
   const [showCursor, setShowCursor] = useState(true);
   const [showPrompt, setShowPrompt] = useState(false);
   const terminalRef = useRef<HTMLDivElement>(null);
@@ -77,7 +78,9 @@ const ProfessionalTerminalLogin: React.FC = () => {
 
     return () => clearInterval(cursorInterval);
   }, []);
-
+  useEffect(()=>{
+    setClient(true)
+  },[])
   // Auto scroll to bottom
   useEffect(() => {
     if (terminalRef.current) {
@@ -227,7 +230,8 @@ const ProfessionalTerminalLogin: React.FC = () => {
   };
 
   return (
-    <div className="h-screen w-screen bg-black text-green-400 font-mono overflow-hidden flex flex-col">
+    client && 
+    <div className="h-screen w-screen bg-black text-green-400 font-mono overflow-hidden flex flex-col suppressHydrationWarning={true}">
       {/* Terminal Header */}
       <div className="flex items-center justify-between border-b border-gray-700 px-4 py-2 bg-gray-900 flex-shrink-0">
         <div className="flex items-center gap-3">
@@ -325,7 +329,10 @@ const ProfessionalTerminalLogin: React.FC = () => {
         </div>
       </div>
     </div>
+        
   );
+
 };
+
 
 export default ProfessionalTerminalLogin;
