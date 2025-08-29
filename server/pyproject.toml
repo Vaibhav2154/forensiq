@@ -17,6 +17,7 @@ dependencies = [
     "google-generativeai",
     "sentence-transformers",
     "chromadb>=1.0.20",
+    "schedule>=1.2.2",
 ]
 
 [tool.setuptools.packages.find]

@@ -7,6 +7,7 @@ from datetime import datetime
 from core import Config, logger
 from services import GeminiService, ChromaDBService
 from routers import auth, users, analysis_router
+from routers import monitoring
 from routers.analysis import set_services
 from model import HealthCheck, ErrorResponse, DatabaseStats
 
@@ -48,7 +49,7 @@ app = FastAPI(
 
 app.add_middleware(
     CORSMiddleware,
-    allow_origins=["*"],  # Configure appropriately for production
+    allow_origins=["*","localhost:3000"],  # Configure appropriately for production
     allow_credentials=True,
     allow_methods=["*"],
     allow_headers=["*"],
@@ -58,6 +59,7 @@ app.add_middleware(
 app.include_router(auth.router)
 app.include_router(users.router)
 app.include_router(analysis_router)
+app.include_router(monitoring.router)
 
 @app.get("/", response_model=dict)
 async def root():

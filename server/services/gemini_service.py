@@ -44,7 +44,7 @@ class GeminiService:
             SYSTEM LOGS:
             {logs}
 
-            SUMMARY:
+            SUMMARY:    
             """
             
             response = self.model.generate_content(prompt)
