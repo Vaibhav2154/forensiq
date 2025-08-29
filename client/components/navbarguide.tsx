@@ -1,11 +1,11 @@
 'use client'
 import React, { useState } from 'react';
 import { Menu, X, Terminal, Shield, Book } from 'lucide-react';
-import { Link, useLocation } from 'react-router-dom';
+import Link from 'next/link'
 
 const Navbar: React.FC = () => {
   const [isMenuOpen, setIsMenuOpen] = useState(false);
-  const location = useLocation();
+  
 
   const navItems = [
     { 
@@ -23,7 +23,7 @@ const Navbar: React.FC = () => {
   ];
 
   const isActiveLink = (href: string) => {
-    return location.pathname === href || (href === '/dashboard' && location.pathname === '/');
+    return window.location.pathname === href || (href === '/dashboard' && window.location.pathname === '/');
   };
 
   return (
@@ -31,7 +31,7 @@ const Navbar: React.FC = () => {
       <div className="container mx-auto px-4 sm:px-6">
         <div className="flex items-center justify-between h-16 sm:h-20">
           {/* Logo */}
-          <Link to="/dashboard" className="flex items-center space-x-2 sm:space-x-3 text-green-400 hover:text-cyan-400 transition-colors">
+          <Link href="/dashboard" className="flex items-center space-x-2 sm:space-x-3 text-green-400 hover:text-cyan-400 transition-colors">
             <Terminal className="w-6 h-6 sm:w-8 sm:h-8" />
             <span className="text-lg sm:text-xl font-bold tracking-wider">
               <span className="hidden sm:inline">FORENSIQ</span>
@@ -44,7 +44,7 @@ const Navbar: React.FC = () => {
             {navItems.map((item) => (
               <Link
                 key={item.name}
-                to={item.href}
+                href={item.href}
                 className={`flex items-center space-x-2 px-4 py-2 transition-all duration-300 border ${
                   isActiveLink(item.href)
                     ? 'border-cyan-400 text-cyan-400 bg-cyan-500/10'
@@ -73,7 +73,7 @@ const Navbar: React.FC = () => {
               {navItems.map((item) => (
                 <Link
                   key={item.name}
-                  to={item.href}
+                  href={item.href}
                   className={`flex items-center space-x-3 px-4 py-3 transition-all duration-300 border ${
                     isActiveLink(item.href)
                       ? 'border-cyan-400 text-cyan-400 bg-cyan-500/10'
