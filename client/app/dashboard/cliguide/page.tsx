@@ -7,11 +7,11 @@ import { BrowserRouter } from 'react-router-dom'
 const page = () => {
   return (
     <div>
-        <BrowserRouter>
-    <Navbar/>
-      <StepGuide/>
+      <BrowserRouter>
+        <Navbar />
+        <StepGuide />
       </BrowserRouter>
-      
+
     </div>
   )
 }

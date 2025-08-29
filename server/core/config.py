@@ -48,6 +48,11 @@ class Config:
     
     MAX_LOG_LENGTH = int(settings.MAX_LOG_LENGTH)
     MAX_RESULTS = int(settings.MAX_RESULTS)
+    
+    AWS_REGION = settings.AWS_REGION
+    AWS_ACCESS_KEY_ID = settings.AWS_ACCESS_KEY_ID
+    AWS_SECRET_ACCESS_KEY = settings.AWS_SECRET_ACCESS_KEY
+    AWS_SESSION_TOKEN = settings.AWS_SESSION_TOKEN
 
 logging.basicConfig(
     level=getattr(logging, Config.LOG_LEVEL),

@@ -1,7 +1,9 @@
 'use client'
 import React, { useState, useEffect } from 'react'
+import { useRouter } from 'next/navigation'
 import Navbar from '../../../components/navbar'
-import Chatbot from '@/components/chatbot';
+import Chatbot from '@/components/chatbot-simple';
+import ThemedMitreSearch from '@/components/themed-mitre-search';
 
 interface Technique {
   id: string;
@@ -12,11 +14,18 @@ interface Technique {
 }
 
 const MitrePage = () => {
+  const router = useRouter();
   const [selectedPhase, setSelectedPhase] = useState<string>('all');
   const [isVisible, setIsVisible] = useState(false);
   const [terminalText, setTerminalText] = useState('');
   const [showCursor, setShowCursor] = useState(true);
   const [isMobile, setIsMobile] = useState(false);
+
+  const handleTechniqueClick = (technique: Technique) => {
+    // Navigate to chat page with the technique as a pre-filled query
+    const techniqueQuery = `Tell me about ${technique.id}: ${technique.name}`;
+    router.push(`/chat?query=${encodeURIComponent(techniqueQuery)}`);
+  };
 
   const fullTerminalText = '> MITRE_ATTACK.DB --LOAD_FRAMEWORK --MODE=ENTERPRISE';
 
@@ -239,7 +248,11 @@ const MitrePage = () => {
             {filteredTechniques.map((technique) => {
               const phaseStyle = getPhaseStyle(technique.phase);
               return (
-                <div key={technique.id} className="border border-gray-700/50 bg-black/50 p-3 sm:p-4 md:p-6 hover:border-cyan-500/50 transition-colors">
+                <div 
+                  key={technique.id} 
+                  className="border border-gray-700/50 bg-black/50 p-3 sm:p-4 md:p-6 hover:border-cyan-500/50 transition-colors cursor-pointer"
+                  onClick={() => handleTechniqueClick(technique)}
+                >
                   <div className="flex flex-col sm:flex-row justify-between items-start mb-3 sm:mb-4 gap-3 sm:gap-0">
                     <div className="w-full">
                       <h3 className="text-base sm:text-lg font-semibold text-cyan-400 mb-2 break-words">
@@ -285,6 +298,22 @@ const MitrePage = () => {
           )}
         </div>
 
+        {/* AI-Powered MITRE Search Section */}
+        <div className={`mt-8 sm:mt-12 transform transition-all duration-1000 delay-800 ${isVisible ? 'translate-y-0 opacity-100' : 'translate-y-10 opacity-0'}`}>
+          <div className="mb-6">
+            <h2 className="text-xl sm:text-2xl font-bold text-cyan-400 mb-2 tracking-wider break-words font-mono">
+              [AI_ENHANCED_THREAT_ANALYSIS.SYS]
+            </h2>
+            <div className="text-green-400 text-xs sm:text-sm overflow-hidden">
+              <div className="whitespace-nowrap overflow-x-auto">
+                &gt; AWS_TITAN_EMBEDDINGS --SEMANTIC_SEARCH --REAL_TIME_ANALYSIS
+              </div>
+            </div>
+          </div>
+          
+          <ThemedMitreSearch isVisible={isVisible} />
+        </div>
+
         {/* Floating ASCII elements - hidden on mobile for cleaner look */}
         <div className="hidden md:block absolute top-32 left-10 text-green-500/20 font-mono text-xs animate-pulse">
           {`{
@@ -297,7 +326,7 @@ const MitrePage = () => {
         <div className="hidden md:block absolute top-48 right-12 text-green-500/20 font-mono text-xs animate-pulse delay-1000">
           &gt; ./attack_navigator.exe
         </div>
-        <Chatbot/>
+        <Chatbot /> 
         <div className="hidden sm:block absolute bottom-32 left-16 text-green-500/20 font-mono text-xs animate-pulse delay-2000">
           [MITRE@FORENSIQ]#
         </div>

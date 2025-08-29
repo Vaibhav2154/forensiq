@@ -108,3 +108,98 @@ class GeminiService:
         except Exception as e:
             logger.error(f"Error in threat analysis enhancement: {str(e)}")
             return f"Error enhancing analysis: {str(e)}"
+    
+    async def generate_conversational_response(self, query: str, context: str) -> str:
+        """
+        Generate a conversational response about MITRE ATT&CK using context.
+        
+        Args:
+            query (str): User query
+            context (str): Context with techniques or general guidance
+            
+        Returns:
+            str: Conversational response
+        """
+        try:
+            response = self.model.generate_content(context)
+            
+            if response and response.text:
+                logger.info("Successfully generated conversational response")
+                return response.text.strip()
+            else:
+                logger.warning("Empty response from Gemini for conversational query")
+                return f"I'm unable to provide a detailed response to '{query}' at the moment."
+                
+        except Exception as e:
+            logger.error(f"Error generating conversational response: {str(e)}")
+            return f"Error generating response: {str(e)}"
+    
+    async def generate_mitre_response(self, query: str, context_techniques: list) -> dict:
+        """
+        Generate a comprehensive response about MITRE framework data.
+        
+        Args:
+            query (str): User query
+            context_techniques (list): Relevant MITRE techniques from context
+            
+        Returns:
+            dict: Structured response with techniques and insights
+        """
+        try:
+            # Prepare context from techniques
+            context_text = ""
+            for technique in context_techniques[:3]:  # Use top 3 most relevant
+                context_text += f"""
+Technique: {technique['name']} ({technique['technique_id']})
+Description: {technique['description']}
+Tactics: {', '.join(technique['kill_chain_phases'])}
+Platforms: {', '.join(technique['platforms'])}
+Relevance Score: {technique['relevance_score']:.3f}
+
+"""
+            
+            response_dict = {
+                "query": query,
+                "relevant_techniques": context_techniques,
+                "summary": f"Found {len(context_techniques)} relevant MITRE ATT&CK techniques",
+                "context": context_text.strip(),
+                "embedding_model": "gemini-2.5-flash",
+                "total_techniques": len(context_techniques)
+            }
+            
+            # Add insights based on the techniques found
+            if context_techniques:
+                top_technique = context_techniques[0]
+                response_dict["top_match"] = {
+                    "technique_id": top_technique['technique_id'],
+                    "name": top_technique['name'],
+                    "relevance_score": top_technique['relevance_score'],
+                    "description": top_technique['description'][:200] + "..." if len(top_technique['description']) > 200 else top_technique['description']
+                }
+                
+                # Extract common tactics
+                all_tactics = []
+                for tech in context_techniques:
+                    all_tactics.extend(tech['kill_chain_phases'])
+                
+                unique_tactics = list(set([tactic for tactic in all_tactics if tactic]))
+                response_dict["common_tactics"] = unique_tactics[:5]  # Top 5 tactics
+                
+                # Extract common platforms
+                all_platforms = []
+                for tech in context_techniques:
+                    all_platforms.extend(tech['platforms'])
+                
+                unique_platforms = list(set([platform for platform in all_platforms if platform]))
+                response_dict["common_platforms"] = unique_platforms[:5]  # Top 5 platforms
+            
+            return response_dict
+            
+        except Exception as e:
+            logger.error(f"Error generating MITRE response: {str(e)}")
+            return {
+                "query": query,
+                "error": str(e),
+                "relevant_techniques": [],
+                "summary": "Error processing query"
+            }

@@ -9,6 +9,11 @@ class Config:
     CHROMA_PERSIST_DIRECTORY = os.getenv("CHROMA_PERSIST_DIRECTORY", "./chroma_db")
     EMBEDDING_MODEL = "all-MiniLM-L6-v2"
     
+    # AWS Configuration for Bedrock Titan
+    AWS_REGION = os.getenv("AWS_REGION", "us-east-1")
+    AWS_ACCESS_KEY_ID = os.getenv("AWS_ACCESS_KEY_ID")
+    AWS_SECRET_ACCESS_KEY = os.getenv("AWS_SECRET_ACCESS_KEY")
+    
     ATTACK_DATA_PATH = "./attack-stix-data/enterprise-attack/enterprise-attack-17.1.json"
     
     LOG_LEVEL = os.getenv("LOG_LEVEL", "INFO")
