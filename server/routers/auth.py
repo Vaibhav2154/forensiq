@@ -47,7 +47,7 @@ async def register_user(user: UserCreate):
 
 @router.post("/login", response_model=Token)
 async def login(login_data: LoginRequest):
-    user = await database.user_collection.find_one({"email": login_data.username})
+    user = await database.user_collection.find_one({"username": login_data.username})
     
     if not user or not security.verify_password(login_data.password, user["hashed_password"]):
         raise HTTPException(

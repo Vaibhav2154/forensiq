@@ -154,21 +154,26 @@ const router = useRouter();
         addTerminalLine('[OK] Email format validated', 'success');
         setSignUpStep('password');
         break;
-      case 'password':
-        addTerminalLine(`Password: ${'•'.repeat(currentInput.length)}`, 'user');
-        setFormData(prev => ({ ...prev, password: currentInput }));
-        addTerminalLine('[OK] Password meets security requirements', 'success');
-        // Automatically process registration after password is entered
-        setTimeout(() => {
-          processRegistration();
-        }, 1000);
-        break;
-    }
-    
+        case 'password':
+          addTerminalLine(`Password: ${'•'.repeat(currentInput.length)}`, 'user');
+          const pwd = currentInput;
+          setFormData(prev => ({ ...prev, password: pwd }));
+          
+          addTerminalLine('[OK] Password meets security requirements', 'success');
+          const payload = {
+    username: formData.username,
+    email: formData.email,
+    password: pwd,
+  };
+          setTimeout(() => {
+            processRegistration(payload);  // pass explicitly
+          }, 1000);
+          break;
+      }
     setCurrentInput('');
   };
 
-  const processRegistration = () => {
+  const processRegistration = (data: SignUpFormData) => {
     setShowPrompt(false);
     addTerminalLine('', 'system');
     addTerminalLine('Processing registration...', 'info');
@@ -191,18 +196,19 @@ const router = useRouter();
     }, 2000);
     
     */
-   console.log(formData)
+   console.log(data)
     fetch('http://127.0.0.1:8000/register', {
       method: 'POST',
       headers: {
         'Content-Type': 'application/json',
       },
-      body: JSON.stringify(formData),
+      body: JSON.stringify(data),
     })
       .then(async (res) => {
         if (res.ok) {
             const data = await res.json();
             localStorage.setItem('user', JSON.stringify(data))
+            localStorage.setItem('user.email', data.email)
           addTerminalLine('[OK] Validating user information', 'success');
           addTerminalLine('[OK] Checking username availability', 'success');
           addTerminalLine('[OK] Email verification sent', 'success');
