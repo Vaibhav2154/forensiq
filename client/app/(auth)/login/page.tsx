@@ -1,5 +1,6 @@
 'use client'
 import React, { useState, useEffect, useRef } from 'react';
+import {useRouter} from 'next/navigation'
 
 interface TerminalLine {
   id: number;
@@ -12,6 +13,7 @@ interface LoginFormData {
   username: string;
   password: string;
 }
+
 
 const ProfessionalTerminalLogin: React.FC = () => {
   const [terminalLines, setTerminalLines] = useState<TerminalLine[]>([]);
@@ -107,7 +109,7 @@ const ProfessionalTerminalLogin: React.FC = () => {
       addTerminalLine('', 'system');
       addTerminalLine('Authenticating...', 'info');
       console.log(username, currentInput);
-      fetch('http://127.0.0.1:8000/login', {
+      fetch('https://39619b5d65b6.ngrok-free.app/login', {
         method: 'POST',
         headers: {
           'Content-Type': 'application/json',
@@ -129,6 +131,7 @@ const ProfessionalTerminalLogin: React.FC = () => {
             addTerminalLine('', 'system');
             setIsAuthenticated(true);
             setLoginStep('complete');
+            router.push('/dashboard');
           } else {
             const error = await res.text();
             addTerminalLine(`[ERROR] ${error || 'Invalid credentials'}`, 'error');
@@ -144,6 +147,7 @@ const ProfessionalTerminalLogin: React.FC = () => {
     }
   };
 
+  const router = useRouter();
   const handleCommandSubmit = () => {
     if (!currentInput.trim()) return;
     
@@ -289,15 +293,7 @@ const ProfessionalTerminalLogin: React.FC = () => {
             <div className="flex items-start gap-2">
               <span className="text-green-400">user@secure-system:~$</span>
               <div className="flex items-center flex-1">
-                <input
-                  ref={inputRef}
-                  type="text"
-                  value={currentInput}
-                  onChange={(e) => setCurrentInput(e.target.value)}
-                  onKeyPress={handleKeyPress}
-                  className="bg-transparent text-white outline-none border-none flex-1"
-                  style={{ caretColor: 'transparent' }}
-                />
+
                 {showCursor && (
                   <span className="bg-green-400 text-black">█</span>
                 )}

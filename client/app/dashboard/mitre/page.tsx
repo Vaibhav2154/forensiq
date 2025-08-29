@@ -15,10 +15,19 @@ const MitrePage = () => {
   const [isVisible, setIsVisible] = useState(false);
   const [terminalText, setTerminalText] = useState('');
   const [showCursor, setShowCursor] = useState(true);
+  const [isMobile, setIsMobile] = useState(false);
 
   const fullTerminalText = '> MITRE_ATTACK.DB --LOAD_FRAMEWORK --MODE=ENTERPRISE';
 
   useEffect(() => {
+    // Check if mobile on mount
+    const checkMobile = () => {
+      setIsMobile(window.innerWidth < 768);
+    };
+    
+    checkMobile();
+    window.addEventListener('resize', checkMobile);
+    
     setIsVisible(true);
     
     // Terminal typing effect
@@ -40,23 +49,24 @@ const MitrePage = () => {
     return () => {
       clearInterval(typeInterval);
       clearInterval(cursorInterval);
+      window.removeEventListener('resize', checkMobile);
     };
   }, []);
   
   const killChainPhases = [
-    { id: 'all', name: 'ALL_PHASES', color: 'border-gray-500/50 text-gray-400', bgColor: 'bg-gray-900/30' },
-    { id: 'initial-access', name: 'INITIAL_ACCESS', color: 'border-red-500/50 text-red-400', bgColor: 'bg-red-900/30' },
-    { id: 'execution', name: 'EXECUTION', color: 'border-orange-500/50 text-orange-400', bgColor: 'bg-orange-900/30' },
-    { id: 'persistence', name: 'PERSISTENCE', color: 'border-yellow-500/50 text-yellow-400', bgColor: 'bg-yellow-900/30' },
-    { id: 'privilege-escalation', name: 'PRIV_ESCALATION', color: 'border-pink-500/50 text-pink-400', bgColor: 'bg-pink-900/30' },
-    { id: 'defense-evasion', name: 'DEFENSE_EVASION', color: 'border-purple-500/50 text-purple-400', bgColor: 'bg-purple-900/30' },
-    { id: 'credential-access', name: 'CRED_ACCESS', color: 'border-indigo-500/50 text-indigo-400', bgColor: 'bg-indigo-900/30' },
-    { id: 'discovery', name: 'DISCOVERY', color: 'border-blue-500/50 text-blue-400', bgColor: 'bg-blue-900/30' },
-    { id: 'lateral-movement', name: 'LATERAL_MOVEMENT', color: 'border-cyan-500/50 text-cyan-400', bgColor: 'bg-cyan-900/30' },
-    { id: 'collection', name: 'COLLECTION', color: 'border-teal-500/50 text-teal-400', bgColor: 'bg-teal-900/30' },
-    { id: 'command-and-control', name: 'C2_COMMAND', color: 'border-green-500/50 text-green-400', bgColor: 'bg-green-900/30' },
-    { id: 'exfiltration', name: 'EXFILTRATION', color: 'border-lime-500/50 text-lime-400', bgColor: 'bg-lime-900/30' },
-    { id: 'impact', name: 'IMPACT', color: 'border-red-600/50 text-red-400', bgColor: 'bg-red-900/50' }
+    { id: 'all', name: 'ALL_PHASES', shortName: 'ALL', color: 'border-gray-500/50 text-gray-400', bgColor: 'bg-gray-900/30' },
+    { id: 'initial-access', name: 'INITIAL_ACCESS', shortName: 'INIT', color: 'border-red-500/50 text-red-400', bgColor: 'bg-red-900/30' },
+    { id: 'execution', name: 'EXECUTION', shortName: 'EXEC', color: 'border-orange-500/50 text-orange-400', bgColor: 'bg-orange-900/30' },
+    { id: 'persistence', name: 'PERSISTENCE', shortName: 'PERS', color: 'border-yellow-500/50 text-yellow-400', bgColor: 'bg-yellow-900/30' },
+    { id: 'privilege-escalation', name: 'PRIV_ESCALATION', shortName: 'PRIV', color: 'border-pink-500/50 text-pink-400', bgColor: 'bg-pink-900/30' },
+    { id: 'defense-evasion', name: 'DEFENSE_EVASION', shortName: 'DEF', color: 'border-purple-500/50 text-purple-400', bgColor: 'bg-purple-900/30' },
+    { id: 'credential-access', name: 'CRED_ACCESS', shortName: 'CRED', color: 'border-indigo-500/50 text-indigo-400', bgColor: 'bg-indigo-900/30' },
+    { id: 'discovery', name: 'DISCOVERY', shortName: 'DISC', color: 'border-blue-500/50 text-blue-400', bgColor: 'bg-blue-900/30' },
+    { id: 'lateral-movement', name: 'LATERAL_MOVEMENT', shortName: 'LAT', color: 'border-cyan-500/50 text-cyan-400', bgColor: 'bg-cyan-900/30' },
+    { id: 'collection', name: 'COLLECTION', shortName: 'COLL', color: 'border-teal-500/50 text-teal-400', bgColor: 'bg-teal-900/30' },
+    { id: 'command-and-control', name: 'C2_COMMAND', shortName: 'C2', color: 'border-green-500/50 text-green-400', bgColor: 'bg-green-900/30' },
+    { id: 'exfiltration', name: 'EXFILTRATION', shortName: 'EXFIL', color: 'border-lime-500/50 text-lime-400', bgColor: 'bg-lime-900/30' },
+    { id: 'impact', name: 'IMPACT', shortName: 'IMPACT', color: 'border-red-600/50 text-red-400', bgColor: 'bg-red-900/50' }
   ];
 
   const sampleTechniques: Technique[] = [
@@ -100,7 +110,7 @@ const MitrePage = () => {
   };
 
   return (
-    <div className='relative bg-black min-h-screen w-screen text-white overflow-hidden font-mono'>
+    <div className='relative bg-black min-h-screen w-full text-white overflow-x-hidden font-mono'>
       {/* Terminal grid overlay */}
       <div 
         className="absolute inset-0 opacity-5"
@@ -118,128 +128,140 @@ const MitrePage = () => {
       
       <Navbar />
       
-      <div className="relative container mx-auto px-6 py-8">
+      <div className="relative container mx-auto px-3 sm:px-4 md:px-6 py-4 sm:py-6 md:py-8 max-w-full">
         {/* Terminal Header */}
-        <div className={`mb-8 transform transition-all duration-1000 ${isVisible ? 'translate-y-0 opacity-100' : '-translate-y-10 opacity-0'}`}>
-          <div className="bg-black/80 backdrop-blur-sm border border-green-500/30 rounded-t-lg p-3 mb-4">
+        <div className={`mb-6 sm:mb-8 transform transition-all duration-1000 ${isVisible ? 'translate-y-0 opacity-100' : '-translate-y-10 opacity-0'}`}>
+          <div className="bg-black/80 backdrop-blur-sm border border-green-500/30 rounded-t-lg p-2 sm:p-3 mb-4 overflow-hidden">
             <div className="flex items-center gap-2 mb-2">
-              <div className="w-3 h-3 rounded-full bg-red-500"></div>
-              <div className="w-3 h-3 rounded-full bg-yellow-500"></div>
-              <div className="w-3 h-3 rounded-full bg-green-500"></div>
-              <span className="ml-4 text-green-400 text-sm">admin@forensiq:~/mitre#</span>
+              <div className="w-2 h-2 sm:w-3 sm:h-3 rounded-full bg-red-500"></div>
+              <div className="w-2 h-2 sm:w-3 sm:h-3 rounded-full bg-yellow-500"></div>
+              <div className="w-2 h-2 sm:w-3 sm:h-3 rounded-full bg-green-500"></div>
+              <span className="ml-2 sm:ml-4 text-green-400 text-xs sm:text-sm">admin@forensiq:~/mitre#</span>
             </div>
-            <div className="text-green-400 text-sm">
-              {terminalText}
-              {showCursor && <span className="bg-green-400 text-black ml-1">▊</span>}
+            <div className="text-green-400 text-xs sm:text-sm overflow-hidden">
+              <div className="whitespace-nowrap overflow-hidden">
+                {isMobile ? terminalText.slice(0, 35) + (terminalText.length > 35 ? '...' : '') : terminalText}
+                {showCursor && <span className="bg-green-400 text-black ml-1">▊</span>}
+              </div>
             </div>
           </div>
           
-          <h1 className="text-4xl font-bold text-green-400 mb-2 tracking-wider">
+          <h1 className="text-2xl sm:text-3xl md:text-4xl font-bold text-green-400 mb-2 tracking-wider break-words">
             [MITRE_ATTACK_FRAMEWORK]
           </h1>
-          <p className="text-cyan-400">&gt; ADVERSARIAL_TACTICS.DB --TECHNIQUES=ENTERPRISE --PROCEDURES=ACTIVE</p>
+          <div className="text-cyan-400 text-xs sm:text-sm overflow-hidden">
+            <div className="whitespace-nowrap overflow-x-auto">
+              &gt; ADVERSARIAL_TACTICS.DB --TECHNIQUES=ENTERPRISE --PROCEDURES=ACTIVE
+            </div>
+          </div>
         </div>
 
         {/* Kill Chain Phase Filter */}
-        <div className={`mb-8 transform transition-all duration-1000 delay-200 ${isVisible ? 'translate-y-0 opacity-100' : 'translate-y-10 opacity-0'}`}>
-          <h3 className="text-lg font-semibold mb-4 text-cyan-400">[KILL_CHAIN_FILTER.SYS]</h3>
-          <div className="flex flex-wrap gap-3">
+        <div className={`mb-6 sm:mb-8 transform transition-all duration-1000 delay-200 ${isVisible ? 'translate-y-0 opacity-100' : 'translate-y-10 opacity-0'}`}>
+          <h3 className="text-base sm:text-lg font-semibold mb-3 sm:mb-4 text-cyan-400 break-words">[KILL_CHAIN_FILTER.SYS]</h3>
+          <div className="flex flex-wrap gap-2 sm:gap-3">
             {killChainPhases.map((phase) => (
               <button
                 key={phase.id}
                 onClick={() => setSelectedPhase(phase.id)}
-                className={`px-4 py-2 text-sm font-medium transition-all duration-200 border hover:shadow-[0_0_10px_rgba(0,255,150,0.3)] ${
+                className={`px-2 sm:px-3 md:px-4 py-1 sm:py-2 text-xs sm:text-sm font-medium transition-all duration-200 border hover:shadow-[0_0_10px_rgba(0,255,150,0.3)] whitespace-nowrap ${
                   selectedPhase === phase.id
                     ? `${phase.color} ${phase.bgColor} border-current shadow-[0_0_15px_rgba(0,255,150,0.4)]`
                     : 'bg-black/50 border-green-500/30 text-green-500 hover:text-green-400 hover:border-green-400'
                 }`}
               >
-                &gt; {phase.name}
+                <span className="hidden sm:inline">&gt; {phase.name}</span>
+                <span className="sm:hidden">&gt; {phase.shortName}</span>
               </button>
             ))}
           </div>
         </div>
-      
 
         {/* Terminal Statistics */}
-        <div className={`grid grid-cols-1 md:grid-cols-4 gap-4 mb-8 transform transition-all duration-1000 delay-400 ${isVisible ? 'translate-y-0 opacity-100' : 'translate-y-10 opacity-0'}`}>
-          <div className="bg-black/80 backdrop-blur-sm border border-green-500/30 p-4">
+        <div className={`grid grid-cols-2 md:grid-cols-4 gap-3 sm:gap-4 mb-6 sm:mb-8 transform transition-all duration-1000 delay-400 ${isVisible ? 'translate-y-0 opacity-100' : 'translate-y-10 opacity-0'}`}>
+          <div className="bg-black/80 backdrop-blur-sm border border-green-500/30 p-3 sm:p-4">
             <div className="flex items-center justify-between">
               <div>
                 <p className="text-green-400 text-xs">[TOTAL_TECHNIQUES]</p>
-                <p className="text-2xl font-bold text-cyan-400">{sampleTechniques.length}</p>
+                <p className="text-xl sm:text-2xl font-bold text-cyan-400">{sampleTechniques.length}</p>
               </div>
-              <div className="text-cyan-400 text-xl">🛡️</div>
+              <div className="text-cyan-400 text-lg sm:text-xl">🛡️</div>
             </div>
           </div>
           
-          <div className="bg-black/80 backdrop-blur-sm border border-purple-500/30 p-4">
+          <div className="bg-black/80 backdrop-blur-sm border border-purple-500/30 p-3 sm:p-4">
             <div className="flex items-center justify-between">
               <div>
                 <p className="text-purple-400 text-xs">[KILL_CHAIN_PHASES]</p>
-                <p className="text-2xl font-bold text-purple-400">{killChainPhases.length - 1}</p>
+                <p className="text-xl sm:text-2xl font-bold text-purple-400">{killChainPhases.length - 1}</p>
               </div>
-              <div className="text-purple-400 text-xl">⚔️</div>
+              <div className="text-purple-400 text-lg sm:text-xl">⚔️</div>
             </div>
           </div>
           
-          <div className="bg-black/80 backdrop-blur-sm border border-green-500/30 p-4">
+          <div className="bg-black/80 backdrop-blur-sm border border-green-500/30 p-3 sm:p-4">
             <div className="flex items-center justify-between">
               <div>
                 <p className="text-green-400 text-xs">[PLATFORMS]</p>
-                <p className="text-2xl font-bold text-green-400">8</p>
+                <p className="text-xl sm:text-2xl font-bold text-green-400">8</p>
               </div>
-              <div className="text-green-400 text-xl">💻</div>
+              <div className="text-green-400 text-lg sm:text-xl">💻</div>
             </div>
           </div>
           
-          <div className="bg-black/80 backdrop-blur-sm border border-cyan-500/30 p-4">
+          <div className="bg-black/80 backdrop-blur-sm border border-cyan-500/30 p-3 sm:p-4">
             <div className="flex items-center justify-between">
               <div>
                 <p className="text-cyan-400 text-xs">[ACTIVE_FILTER]</p>
-                <p className="text-2xl font-bold text-cyan-400">{filteredTechniques.length}</p>
+                <p className="text-xl sm:text-2xl font-bold text-cyan-400">{filteredTechniques.length}</p>
               </div>
-              <div className="text-cyan-400 text-xl">🔍</div>
+              <div className="text-cyan-400 text-lg sm:text-xl">🔍</div>
             </div>
           </div>
         </div>
 
         {/* Terminal Techniques List */}
-        <div className={`bg-black/80 backdrop-blur-sm border border-green-500/30 p-6 transform transition-all duration-1000 delay-600 ${isVisible ? 'translate-y-0 opacity-100' : 'translate-y-10 opacity-0'}`}>
-          <h2 className="text-xl font-semibold mb-6 flex items-center text-green-400">
-            <span className="w-2 h-2 bg-green-500 rounded-full mr-3 animate-pulse"></span>
-            [ATTACK_TECHNIQUES.DB]
+        <div className={`bg-black/80 backdrop-blur-sm border border-green-500/30 p-3 sm:p-4 md:p-6 transform transition-all duration-1000 delay-600 ${isVisible ? 'translate-y-0 opacity-100' : 'translate-y-10 opacity-0'}`}>
+          <h2 className="text-lg sm:text-xl font-semibold mb-4 sm:mb-6 flex flex-col sm:flex-row items-start sm:items-center text-green-400 gap-2 sm:gap-0">
+            <div className="flex items-center">
+              <span className="w-2 h-2 bg-green-500 rounded-full mr-2 sm:mr-3 animate-pulse flex-shrink-0"></span>
+              <span className="break-words">[ATTACK_TECHNIQUES.DB]</span>
+            </div>
             {selectedPhase !== 'all' && (
-              <span className="ml-3 text-sm text-cyan-400">
+              <span className="ml-0 sm:ml-3 text-xs sm:text-sm text-cyan-400 break-words">
                 --FILTER={killChainPhases.find(p => p.id === selectedPhase)?.name}
               </span>
             )}
           </h2>
           
-          <div className="space-y-4">
+          <div className="space-y-3 sm:space-y-4">
             {filteredTechniques.map((technique) => {
               const phaseStyle = getPhaseStyle(technique.phase);
               return (
-                <div key={technique.id} className="border border-gray-700/50 bg-black/50 p-6 hover:border-cyan-500/50 transition-colors">
-                  <div className="flex justify-between items-start mb-4">
-                    <div>
-                      <h3 className="text-lg font-semibold text-cyan-400 mb-2">
+                <div key={technique.id} className="border border-gray-700/50 bg-black/50 p-3 sm:p-4 md:p-6 hover:border-cyan-500/50 transition-colors">
+                  <div className="flex flex-col sm:flex-row justify-between items-start mb-3 sm:mb-4 gap-3 sm:gap-0">
+                    <div className="w-full">
+                      <h3 className="text-base sm:text-lg font-semibold text-cyan-400 mb-2 break-words">
                         &gt; {technique.id}: {technique.name}
                       </h3>
-                      <div className={`inline-block px-3 py-1 text-xs font-medium border ${phaseStyle.color} ${phaseStyle.bgColor}`}>
-                        [{killChainPhases.find(p => p.id === technique.phase)?.name || technique.phase.toUpperCase()}]
+                      <div className={`inline-block px-2 sm:px-3 py-1 text-xs font-medium border ${phaseStyle.color} ${phaseStyle.bgColor} break-words`}>
+                        <span className="hidden sm:inline">[{killChainPhases.find(p => p.id === technique.phase)?.name || technique.phase.toUpperCase()}]</span>
+                        <span className="sm:hidden">[{killChainPhases.find(p => p.id === technique.phase)?.shortName || technique.phase.toUpperCase()}]</span>
                       </div>
                     </div>
                   </div>
                   
-                  <p className="text-gray-300 mb-4 leading-relaxed">
-                    {technique.description}
+                  <p className="text-gray-300 mb-3 sm:mb-4 leading-relaxed text-sm sm:text-base break-words">
+                    {isMobile && technique.description.length > 150
+                      ? `${technique.description.substring(0, 150)}...`
+                      : technique.description
+                    }
                   </p>
                   
-                  <div className="flex flex-wrap gap-2">
-                    <span className="text-sm text-cyan-400 mr-2 font-mono">[PLATFORMS]:</span>
+                  <div className="flex flex-wrap gap-1 sm:gap-2">
+                    <span className="text-xs sm:text-sm text-cyan-400 mr-1 sm:mr-2 font-mono flex-shrink-0">[PLATFORMS]:</span>
                     {technique.platforms.map((platform, index) => (
-                      <span key={index} className="bg-gray-700/50 border border-gray-600/50 text-gray-300 px-2 py-1 text-sm">
+                      <span key={index} className="bg-gray-700/50 border border-gray-600/50 text-gray-300 px-1 sm:px-2 py-1 text-xs break-words">
                         {platform.toUpperCase()}
                       </span>
                     ))}
@@ -250,18 +272,20 @@ const MitrePage = () => {
           </div>
           
           {filteredTechniques.length === 0 && (
-            <div className="text-center py-12">
-              <div className="w-16 h-16 mx-auto mb-4 bg-black border-2 border-green-500 flex items-center justify-center">
-                <span className="text-2xl text-green-400">🔍</span>
+            <div className="text-center py-8 sm:py-12">
+              <div className="w-12 h-12 sm:w-16 sm:h-16 mx-auto mb-4 bg-black border-2 border-green-500 flex items-center justify-center">
+                <span className="text-xl sm:text-2xl text-green-400">🔍</span>
               </div>
-              <h3 className="text-lg font-semibold text-green-400 mb-2 font-mono">[NO_TECHNIQUES_FOUND]</h3>
-              <p className="text-gray-500 font-mono">&gt; Try selecting a different kill chain phase filter.</p>
+              <h3 className="text-base sm:text-lg font-semibold text-green-400 mb-2 font-mono break-words">[NO_TECHNIQUES_FOUND]</h3>
+              <p className="text-gray-500 font-mono text-xs sm:text-sm break-words">
+                &gt; Try selecting a different kill chain phase filter.
+              </p>
             </div>
           )}
         </div>
 
-        {/* Floating ASCII elements */}
-        <div className="absolute top-32 left-10 text-green-500/20 font-mono text-xs animate-pulse">
+        {/* Floating ASCII elements - hidden on mobile for cleaner look */}
+        <div className="hidden md:block absolute top-32 left-10 text-green-500/20 font-mono text-xs animate-pulse">
           {`{
   "framework": "mitre_attack",
   "version": "v16.1",
@@ -269,11 +293,11 @@ const MitrePage = () => {
 }`}
         </div>
         
-        <div className="absolute top-48 right-12 text-green-500/20 font-mono text-xs animate-pulse delay-1000">
+        <div className="hidden md:block absolute top-48 right-12 text-green-500/20 font-mono text-xs animate-pulse delay-1000">
           &gt; ./attack_navigator.exe
         </div>
         
-        <div className="absolute bottom-32 left-16 text-green-500/20 font-mono text-xs animate-pulse delay-2000">
+        <div className="hidden sm:block absolute bottom-32 left-16 text-green-500/20 font-mono text-xs animate-pulse delay-2000">
           [MITRE@FORENSIQ]#
         </div>
       </div>
