@@ -18,6 +18,7 @@ const DashboardPage = () => {
       setIsMobile(window.innerWidth < 768)
     }
     
+    
     checkMobile()
     window.addEventListener('resize', checkMobile)
     
@@ -201,7 +202,7 @@ const DashboardPage = () => {
             </div>
           </div>
           
-          <div className="bg-black/80 backdrop-blur-sm border border-red-500/30 p-3 sm:p-4 font-mono">
+          {/*<div className="bg-black/80 backdrop-blur-sm border border-red-500/30 p-3 sm:p-4 font-mono">
             <div className="flex items-center justify-between">
               <div>
                 <p className="text-red-400 text-xs">[CRITICAL_THREATS]</p>
@@ -209,7 +210,7 @@ const DashboardPage = () => {
               </div>
               <div className="text-red-400 text-lg sm:text-xl animate-pulse">🚨</div>
             </div>
-          </div>
+          </div>*/}
           
           <div className="bg-black/80 backdrop-blur-sm border border-green-500/30 p-3 sm:p-4 font-mono">
             <div className="flex items-center justify-between">
@@ -221,7 +222,7 @@ const DashboardPage = () => {
             </div>
           </div>
           
-          <div className="bg-black/80 backdrop-blur-sm border border-purple-500/30 p-3 sm:p-4 font-mono">
+          {/*<div className="bg-black/80 backdrop-blur-sm border border-purple-500/30 p-3 sm:p-4 font-mono">
             <div className="flex items-center justify-between">
               <div>
                 <p className="text-purple-400 text-xs">[RESPONSE_TIME]</p>
@@ -229,7 +230,7 @@ const DashboardPage = () => {
               </div>
               <div className="text-purple-400 text-lg sm:text-xl">⚡</div>
             </div>
-          </div>
+          </div>*/}
         </div>
 
         {/* Terminal Features Grid */}
@@ -237,7 +238,7 @@ const DashboardPage = () => {
           {features.map((feature, index) => (
             <Link key={index} href={feature.href}>
               <div 
-                className={`relative bg-black/80 backdrop-blur-sm border ${getColorClasses(feature.color)} p-4 sm:p-6 transition-all duration-300 group cursor-pointer hover:shadow-[0_0_20px_rgba(0,255,150,0.3)]`}
+                className={`relative bg-black/80 backdrop-blur-sm border rounded-2xl ${getColorClasses(feature.color)} p-4 sm:p-6 transition-all duration-300 group cursor-pointer hover:shadow-[0_0_20px_rgba(0,255,150,0.3)]`}
                 onMouseEnter={() => setHoveredFeature(index)}
                 onMouseLeave={() => setHoveredFeature(null)}
               >
@@ -275,7 +276,7 @@ const DashboardPage = () => {
         </div>
 
         {/* Terminal Recent Analyses */}
-        <div className={`bg-black/80 backdrop-blur-sm border border-green-500/30 p-4 sm:p-6 transform transition-all duration-1000 delay-600 ${isVisible ? 'translate-y-0 opacity-100' : 'translate-y-10 opacity-0'}`}>
+        <div className={`bg-black/80 backdrop-blur-sm border border-green-500/30 rounded-2xl p-4 sm:p-6 transform transition-all duration-1000 delay-600 ${isVisible ? 'translate-y-0 opacity-100' : 'translate-y-10 opacity-0'}`}>
           <h2 className="text-lg sm:text-xl font-semibold mb-4 sm:mb-6 flex items-center text-green-400">
             <span className="w-2 h-2 bg-green-500 rounded-full mr-2 sm:mr-3 animate-pulse flex-shrink-0"></span>
             <span className="break-words">[RECENT_ANALYSES.LOG]</span>

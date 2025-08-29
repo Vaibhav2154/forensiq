@@ -154,9 +154,9 @@ const AnalysisPage = () => {
       
       <Navbar />
       
-      <div className="relative container mx-auto px-3 sm:px-4 md:px-6 py-4 sm:py-6 md:py-8 max-w-full">
+      <div className="relative container mx-auto px-3 sm:px-4 md:px-6 py-4 sm:py-6 md:py-8 max-w-full h-screen flex flex-col">
         {/* Terminal Header */}
-        <div className={`mb-6 sm:mb-8 transform transition-all duration-1000 ${isVisible ? 'translate-y-0 opacity-100' : '-translate-y-10 opacity-0'}`}>
+        <div className={`mb-6 sm:mb-8 transform transition-all duration-1000 flex-shrink-0 ${isVisible ? 'translate-y-0 opacity-100' : '-translate-y-10 opacity-0'}`}>
           <div className="bg-black/80 backdrop-blur-sm border border-green-500/30 rounded-t-lg p-2 sm:p-3 mb-4 overflow-hidden">
             <div className="flex items-center gap-2 mb-2">
               <div className="w-2 h-2 sm:w-3 sm:h-3 rounded-full bg-red-500"></div>
@@ -182,10 +182,10 @@ const AnalysisPage = () => {
           </div>
         </div>
 
-        <div className={`flex flex-col lg:grid lg:grid-cols-3 gap-4 sm:gap-6 md:gap-8 transform transition-all duration-1000 delay-200 ${isVisible ? 'translate-y-0 opacity-100' : 'translate-y-10 opacity-0'}`}>
+        <div className={`flex flex-col lg:grid lg:grid-cols-3 gap-4 sm:gap-6 md:gap-8 transform transition-all duration-1000 delay-200 flex-1 min-h-0 ${isVisible ? 'translate-y-0 opacity-100' : 'translate-y-10 opacity-0'}`}>
           {/* Input Panel */}
-          <div className="w-full lg:col-span-1 order-1 lg:order-none">
-            <div className="bg-black/80 backdrop-blur-sm border border-green-500/30 p-3 sm:p-4 md:p-6 w-full">
+          <div className="w-full lg:col-span-1 order-1 lg:order-none flex-shrink-0">
+            <div className="bg-black/80 backdrop-blur-sm border border-green-500/30 p-3 sm:p-4 md:p-6 w-full h-full">
               <h2 className="text-lg sm:text-xl font-semibold mb-3 sm:mb-4 flex items-center text-green-400 break-words">
                 <span className="w-2 h-2 bg-green-500 rounded-full mr-2 sm:mr-3 animate-pulse flex-shrink-0"></span>
                 <span className="text-sm sm:text-base">[ANALYSIS_CONFIG.SYS]</span>
@@ -266,11 +266,11 @@ const AnalysisPage = () => {
           </div>
 
           {/* Results Panel */}
-          <div className="w-full lg:col-span-2 order-2 lg:order-none">
+          <div className="w-full lg:col-span-2 order-2 lg:order-none flex-1 min-h-0">
             {analysis ? (
-              <div className="space-y-4 sm:space-y-6">
-                {/* Header */}
-                <div className="bg-black/80 backdrop-blur-sm border border-cyan-500/30 p-3 sm:p-4 md:p-6">
+              <div className="h-full flex flex-col">
+                {/* Header - Fixed */}
+                <div className="bg-black/80 backdrop-blur-sm border border-cyan-500/30 p-3 sm:p-4 md:p-6 flex-shrink-0">
                   <div className="flex flex-col sm:flex-row justify-between items-start mb-4 gap-3 sm:gap-0">
                     <h2 className="text-lg sm:text-xl font-semibold text-cyan-400 break-words">[ANALYSIS_RESULTS.LOG]</h2>
                     <div className="text-left sm:text-right text-xs sm:text-sm text-green-400 font-mono">
@@ -289,84 +289,89 @@ const AnalysisPage = () => {
                   </div>
                 </div>
 
-                {/* Summary */}
-                <div className="bg-black/80 backdrop-blur-sm border border-green-500/30 p-3 sm:p-4 md:p-6">
-                  <h3 className="text-base sm:text-lg font-semibold mb-3 sm:mb-4 flex items-center text-green-400">
-                    <span className="w-2 h-2 bg-green-500 rounded-full mr-2 sm:mr-3 animate-pulse flex-shrink-0"></span>
-                    <span className="break-words text-sm sm:text-base">[EXECUTIVE_SUMMARY.TXT]</span>
-                  </h3>
-                  <div 
-                    className="prose prose-invert max-w-none text-gray-300 leading-relaxed text-sm sm:text-base"
-                    dangerouslySetInnerHTML={{ __html: formatMarkdown(analysis.summary) }}
-                  />
-                </div>
+                {/* Scrollable Content Area */}
+                <div className="flex-1 overflow-y-auto p-3 sm:p-4 md:p-6 custom-scrollbar">
+                  <div className="space-y-4 sm:space-y-6">
+                    {/* Summary */}
+                    <div className="bg-black/80 backdrop-blur-sm border border-green-500/30 p-3 sm:p-4 md:p-6">
+                      <h3 className="text-base sm:text-lg font-semibold mb-3 sm:mb-4 flex items-center text-green-400">
+                        <span className="w-2 h-2 bg-green-500 rounded-full mr-2 sm:mr-3 animate-pulse flex-shrink-0"></span>
+                        <span className="break-words text-sm sm:text-base">[EXECUTIVE_SUMMARY.TXT]</span>
+                      </h3>
+                      <div 
+                        className="prose prose-invert max-w-none text-gray-300 leading-relaxed text-sm sm:text-base"
+                        dangerouslySetInnerHTML={{ __html: formatMarkdown(analysis.summary) }}
+                      />
+                    </div>
 
-                {/* MITRE ATT&CK Techniques */}
-                <div className="bg-black/80 backdrop-blur-sm border border-red-500/30 p-3 sm:p-4 md:p-6">
-                  <h3 className="text-base sm:text-lg font-semibold mb-3 sm:mb-4 flex items-center text-red-400">
-                    <span className="w-2 h-2 bg-red-500 rounded-full mr-2 sm:mr-3 animate-pulse flex-shrink-0"></span>
-                    <span className="break-words text-sm sm:text-base">[MITRE_ATTACK_TECHNIQUES.DB]</span>
-                  </h3>
-                  
-                  <div className="space-y-3 sm:space-y-4">
-                    {analysis.matched_techniques.map((technique, index) => (
-                      <div key={index} className="border border-gray-700/50 bg-black/50 p-3 sm:p-4 hover:border-cyan-500/50 transition-colors">
-                        <div className="flex flex-col sm:flex-row justify-between items-start mb-3 gap-2">
-                          <div className="w-full">
-                            <h4 className="font-semibold text-cyan-400 font-mono text-sm sm:text-base break-words">
-                              &gt; {technique.technique_id}: {technique.name}
-                            </h4>
-                            <div className={`inline-block px-2 py-1 text-xs font-medium border mt-2 ${getThreatLevelColor(technique.relevance_score)}`}>
-                              [RELEVANCE: {(technique.relevance_score * 100).toFixed(1)}%]
+                    {/* MITRE ATT&CK Techniques */}
+                    <div className="bg-black/80 backdrop-blur-sm border border-red-500/30 p-3 sm:p-4 md:p-6">
+                      <h3 className="text-base sm:text-lg font-semibold mb-3 sm:mb-4 flex items-center text-red-400">
+                        <span className="w-2 h-2 bg-red-500 rounded-full mr-2 sm:mr-3 animate-pulse flex-shrink-0"></span>
+                        <span className="break-words text-sm sm:text-base">[MITRE_ATTACK_TECHNIQUES.DB]</span>
+                      </h3>
+                      
+                      <div className="space-y-3 sm:space-y-4">
+                        {analysis.matched_techniques.map((technique, index) => (
+                          <div key={index} className="border border-gray-700/50 bg-black/50 p-3 sm:p-4 hover:border-cyan-500/50 transition-colors">
+                            <div className="flex flex-col sm:flex-row justify-between items-start mb-3 gap-2">
+                              <div className="w-full">
+                                <h4 className="font-semibold text-cyan-400 font-mono text-sm sm:text-base break-words">
+                                  &gt; {technique.technique_id}: {technique.name}
+                                </h4>
+                                <div className={`inline-block px-2 py-1 text-xs font-medium border mt-2 ${getThreatLevelColor(technique.relevance_score)}`}>
+                                  [RELEVANCE: {(technique.relevance_score * 100).toFixed(1)}%]
+                                </div>
+                              </div>
+                            </div>
+                            
+                            <p className="text-gray-300 text-xs sm:text-sm mb-3 leading-relaxed break-words">
+                              {technique.description.length > (isMobile ? 200 : 300)
+                                ? `${technique.description.substring(0, isMobile ? 200 : 300)}...` 
+                                : technique.description
+                              }
+                            </p>
+                            
+                            <div className="flex flex-wrap gap-1 sm:gap-2 mb-2">
+                              <span className="text-xs text-cyan-400 font-mono flex-shrink-0">[KILL_CHAIN]:</span>
+                              {technique.kill_chain_phases.map((phase, i) => (
+                                <span key={i} className={`px-1 sm:px-2 py-1 text-xs font-medium border ${getPhaseColor(phase)} break-words`}>
+                                  {phase.replace('-', '_').toUpperCase()}
+                                </span>
+                              ))}
+                            </div>
+                            
+                            <div className="flex flex-wrap gap-1 sm:gap-2">
+                              <span className="text-xs text-cyan-400 font-mono flex-shrink-0">[PLATFORMS]:</span>
+                              {technique.platforms.map((platform, i) => (
+                                <span key={i} className="bg-gray-700/50 border border-gray-600/50 text-gray-300 px-1 sm:px-2 py-1 text-xs">
+                                  {platform.toUpperCase()}
+                                </span>
+                              ))}
                             </div>
                           </div>
-                        </div>
-                        
-                        <p className="text-gray-300 text-xs sm:text-sm mb-3 leading-relaxed break-words">
-                          {technique.description.length > (isMobile ? 200 : 300)
-                            ? `${technique.description.substring(0, isMobile ? 200 : 300)}...` 
-                            : technique.description
-                          }
-                        </p>
-                        
-                        <div className="flex flex-wrap gap-1 sm:gap-2 mb-2">
-                          <span className="text-xs text-cyan-400 font-mono flex-shrink-0">[KILL_CHAIN]:</span>
-                          {technique.kill_chain_phases.map((phase, i) => (
-                            <span key={i} className={`px-1 sm:px-2 py-1 text-xs font-medium border ${getPhaseColor(phase)} break-words`}>
-                              {phase.replace('-', '_').toUpperCase()}
-                            </span>
-                          ))}
-                        </div>
-                        
-                        <div className="flex flex-wrap gap-1 sm:gap-2">
-                          <span className="text-xs text-cyan-400 font-mono flex-shrink-0">[PLATFORMS]:</span>
-                          {technique.platforms.map((platform, i) => (
-                            <span key={i} className="bg-gray-700/50 border border-gray-600/50 text-gray-300 px-1 sm:px-2 py-1 text-xs">
-                              {platform.toUpperCase()}
-                            </span>
-                          ))}
-                        </div>
+                        ))}
                       </div>
-                    ))}
+                    </div>
+
+                    {/* Enhanced Analysis */}
+                    {enhanceWithAI && analysis.enhanced_analysis && (
+                      <div className="bg-black/80 backdrop-blur-sm border border-purple-500/30 p-3 sm:p-4 md:p-6">
+                        <h3 className="text-base sm:text-lg font-semibold mb-3 sm:mb-4 flex items-center text-purple-400">
+                          <span className="w-2 h-2 bg-purple-500 rounded-full mr-2 sm:mr-3 animate-pulse flex-shrink-0"></span>
+                          <span className="break-words text-sm sm:text-base">[AI_ENHANCED_THREAT_ANALYSIS.AI]</span>
+                        </h3>
+                        <div 
+                          className="prose prose-invert max-w-none text-gray-300 leading-relaxed text-sm sm:text-base"
+                          dangerouslySetInnerHTML={{ __html: formatMarkdown(analysis.enhanced_analysis) }}
+                        />
+                      </div>
+                    )}
                   </div>
                 </div>
-
-                {/* Enhanced Analysis */}
-                {enhanceWithAI && analysis.enhanced_analysis && (
-                  <div className="bg-black/80 backdrop-blur-sm border border-purple-500/30 p-3 sm:p-4 md:p-6">
-                    <h3 className="text-base sm:text-lg font-semibold mb-3 sm:mb-4 flex items-center text-purple-400">
-                      <span className="w-2 h-2 bg-purple-500 rounded-full mr-2 sm:mr-3 animate-pulse flex-shrink-0"></span>
-                      <span className="break-words text-sm sm:text-base">[AI_ENHANCED_THREAT_ANALYSIS.AI]</span>
-                    </h3>
-                    <div 
-                      className="prose prose-invert max-w-none text-gray-300 leading-relaxed text-sm sm:text-base"
-                      dangerouslySetInnerHTML={{ __html: formatMarkdown(analysis.enhanced_analysis) }}
-                    />
-                  </div>
-                )}
               </div>
             ) : (
-              <div className="bg-black/80 backdrop-blur-sm border border-green-500/30 p-6 sm:p-8 md:p-12 text-center">
+              <div className="bg-black/80 backdrop-blur-sm border border-green-500/30 p-6 sm:p-8 md:p-12 text-center h-full flex flex-col justify-center">
                 <div className="w-12 h-12 sm:w-16 sm:h-16 mx-auto mb-4 bg-black border-2 border-green-500 flex items-center justify-center">
                   <svg className="w-6 h-6 sm:w-8 sm:h-8 text-green-400" fill="none" stroke="currentColor" viewBox="0 0 24 24">
                     <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M9 19v-6a2 2 0 00-2-2H5a2 2 0 00-2 2v6a2 2 0 002 2h2a2 2 0 002-2zm0 0V9a2 2 0 012-2h2a2 2 0 012 2v10m-6 0a2 2 0 002 2h2a2 2 0 002-2m0 0V5a2 2 0 012-2h2a2 2 0 012 2v4a2 2 0 01-2 2h-2a2 2 0 01-2-2z" />
@@ -446,6 +451,31 @@ const AnalysisPage = () => {
 
         .prose li {
           color: #d1d5db !important;
+        }
+
+        /* Custom scrollbar */
+        .custom-scrollbar {
+          scrollbar-width: thin;
+          scrollbar-color: #00ff96 #1a1a1a;
+        }
+
+        .custom-scrollbar::-webkit-scrollbar {
+          width: 8px;
+        }
+
+        .custom-scrollbar::-webkit-scrollbar-track {
+          background: #1a1a1a;
+          border-radius: 4px;
+        }
+
+        .custom-scrollbar::-webkit-scrollbar-thumb {
+          background: #00ff96;
+          border-radius: 4px;
+          border: 1px solid #000;
+        }
+
+        .custom-scrollbar::-webkit-scrollbar-thumb:hover {
+          background: #22d3ee;
         }
 
         @media (max-width: 640px) {
