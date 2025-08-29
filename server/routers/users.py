@@ -4,11 +4,27 @@ from typing import Optional
 
 from core import security
 from core.config import settings
-from model.users import UserBase,UserUpdate,PasswordChange
+from model.users import UserBase,UserUpdate,PasswordChange,UserUpdateUsername
 from db import database
 from routers.auth import get_current_user
 
 router = APIRouter(prefix="/users", tags=["Users"])
+
+@router.put("/update-username", response_model=UserBase)
+async def update_username(user_update: UserUpdateUsername):
+    """Update username if email exists, otherwise error"""
+
+    user = await database.user_collection.find_one({"email": user_update.email})
+    if not user:
+        raise HTTPException(status_code=404, detail="Email not found")
+
+    await database.user_collection.update_one(
+        {"email": user_update.email},
+        {"$set": {"username": user_update.username}}
+    )
+
+    user["username"] = user_update.username  # reflect change
+    return UserBase(**user)
 
 
 
@@ -50,6 +66,7 @@ async def update_current_user(
     # Return updated user
     updated_user = await database.user_collection.find_one({"username": current_user["username"]})
     return UserBase(**updated_user)
+
 
 @router.put("/me/password")
 async def change_password(

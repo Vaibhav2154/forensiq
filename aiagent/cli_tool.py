@@ -39,16 +39,99 @@ import base64
 import hashlib
 import getpass
 
+# Rich imports for colorful CLI
+from rich.console import Console
+from rich.panel import Panel
+from rich.text import Text
+from rich.table import Table
+from rich.progress import Progress, SpinnerColumn, TextColumn, BarColumn, TaskProgressColumn
+from rich.prompt import Prompt, Confirm
+from rich.syntax import Syntax
+from rich.tree import Tree
+from rich.columns import Columns
+from rich.status import Status
+from rich import box
+from rich.align import Align
+from rich.layout import Layout
+from rich.live import Live
+import rich.traceback
+
+# Install rich traceback for better error display
+rich.traceback.install()
+
 # Import AI Agent and Dynamic Log Extractor
 from ai_agent import AIAgent
 from dynamic_log_extractor import DynamicLogExtractor
 from mongodb_service import mongodb_service
+
+# Initialize Rich Console
+console = Console()
 
 # Configuration
 DEFAULT_CONFIG_DIR = Path.home() / ".forensiq"
 CONFIG_FILE = DEFAULT_CONFIG_DIR / "config.json"
 CREDENTIALS_FILE = DEFAULT_CONFIG_DIR / "credentials.enc"
 LOGS_CACHE = DEFAULT_CONFIG_DIR / "logs_cache"
+
+def print_banner():
+    """Display ForensIQ CLI banner."""
+    banner_text = """
+███████╗ ██████╗ ██████╗ ███████╗███╗   ██╗███████╗██╗ ██████╗ 
+██╔════╝██╔═══██╗██╔══██╗██╔════╝████╗  ██║██╔════╝██║██╔═══██╗
+█████╗  ██║   ██║██████╔╝█████╗  ██╔██╗ ██║███████╗██║██║   ██║
+██╔══╝  ██║   ██║██╔══██╗██╔══╝  ██║╚██╗██║╚════██║██║██║▄▄ ██║
+██║     ╚██████╔╝██║  ██║███████╗██║ ╚████║███████║██║╚██████╔╝
+╚═╝      ╚═════╝ ╚═╝  ╚═╝╚══════╝╚═╝  ╚═══╝╚══════╝╚═╝ ╚══▀▀═╝ 
+    """
+    console.print(Panel(
+        Align.center(Text(banner_text, style="bold cyan")),
+        title="[bold green]ForensIQ CLI Tool[/bold green]",
+        subtitle="[italic]Automated Log Analysis & Threat Detection[/italic]",
+        border_style="bright_blue",
+        padding=(1, 2)
+    ))
+
+def success_message(message: str):
+    """Display success message."""
+    console.print(f"[bold green]✓[/bold green] {message}")
+
+def error_message(message: str):
+    """Display error message."""
+    console.print(f"[bold red]✗[/bold red] {message}")
+
+def warning_message(message: str):
+    """Display warning message."""
+    console.print(f"[bold yellow]⚠[/bold yellow] {message}")
+
+def info_message(message: str):
+    """Display info message."""
+    console.print(f"[bold blue]ℹ[/bold blue] {message}")
+
+def section_header(title: str, icon: str = "🔍"):
+    """Display section header."""
+    console.print(f"\n[bold cyan]{icon} {title}[/bold cyan]")
+    console.print("[dim]" + "─" * (len(title) + 3) + "[/dim]")
+
+def create_status_table(data: Dict[str, Any], title: str = "Status"):
+    """Create a status table."""
+    table = Table(title=title, box=box.ROUNDED, border_style="bright_blue")
+    table.add_column("Property", style="cyan", no_wrap=True)
+    table.add_column("Value", style="green")
+    
+    for key, value in data.items():
+        # Format key to be more readable
+        formatted_key = key.replace("_", " ").title()
+        # Format value based on type
+        if isinstance(value, bool):
+            formatted_value = "✓ Enabled" if value else "✗ Disabled"
+            style = "green" if value else "red"
+            table.add_row(formatted_key, f"[{style}]{formatted_value}[/{style}]")
+        elif isinstance(value, (int, float)):
+            table.add_row(formatted_key, f"[yellow]{value:,}[/yellow]")
+        else:
+            table.add_row(formatted_key, str(value))
+    
+    return table
 
 class ForensIQCLI:
     """Main CLI class for ForensIQ automated log analysis."""
@@ -267,33 +350,34 @@ class ForensIQCLI:
         """Authenticate user and store token."""
         api_url = api_url or self.config.get('api_url', 'http://localhost:8000')
         
-        try:
-            async with aiohttp.ClientSession() as session:
-                login_data = {
-                    'username': username,
-                    'password': password
-                }
-                
-                async with session.post(f"{api_url}/login", json=login_data) as response:
-                    if response.status == 200:
-                        result = await response.json()
-                        token = result.get('access_token')
-                        
-                        if token:
-                            self._save_credentials(username, token, password)
-                            self.session_token = token
-                            self.config['api_url'] = api_url
-                            self.config['username'] = username
-                            self._save_config()
-                            self.logger.info(f"Authentication successful for user: {username}")
-                            return True
-                    else:
-                        error_detail = await response.text()
-                        self.logger.error(f"Authentication failed: {error_detail}")
-                        return False
-        except Exception as e:
-            self.logger.error(f"Authentication error: {e}")
-            return False
+        with console.status("[bold green]Authenticating...", spinner="dots") as status:
+            try:
+                async with aiohttp.ClientSession() as session:
+                    login_data = {
+                        'username': username,
+                        'password': password
+                    }
+                    
+                    async with session.post(f"{api_url}/login", json=login_data) as response:
+                        if response.status == 200:
+                            result = await response.json()
+                            token = result.get('access_token')
+                            
+                            if token:
+                                self._save_credentials(username, token, password)
+                                self.session_token = token
+                                self.config['api_url'] = api_url
+                                self.config['username'] = username
+                                self._save_config()
+                                self.logger.info(f"Authentication successful for user: {username}")
+                                return True
+                        else:
+                            error_detail = await response.text()
+                            self.logger.error(f"Authentication failed: {error_detail}")
+                            return False
+            except Exception as e:
+                self.logger.error(f"Authentication error: {e}")
+                return False
     
     async def register_user(self, username: str, email: str, password: str) -> bool:
         """
@@ -307,30 +391,31 @@ class ForensIQCLI:
         Returns:
             bool: True if registration successful, False otherwise
         """
-        try:
-            api_base = self.config.get('api_url', 'http://localhost:8000')
-            register_url = f"{api_base}/register"
-            
-            # Prepare registration request
-            user_data = {
-                "username": username,
-                "email": email,
-                "password": password
-            }
-            
-            async with aiohttp.ClientSession() as session:
-                async with session.post(register_url, json=user_data) as response:
-                    if response.status == 200:
-                        self.logger.info(f"Successfully registered user: {username}")
-                        return True
-                    else:
-                        error_detail = await response.text()
-                        self.logger.error(f"Registration failed: {response.status} - {error_detail}")
-                        return False
-                        
-        except Exception as e:
-            self.logger.error(f"Registration error: {e}")
-            return False
+        with console.status("[bold blue]Registering user...", spinner="dots") as status:
+            try:
+                api_base = self.config.get('api_url', 'http://localhost:8000')
+                register_url = f"{api_base}/register"
+                
+                # Prepare registration request
+                user_data = {
+                    "username": username,
+                    "email": email,
+                    "password": password
+                }
+                
+                async with aiohttp.ClientSession() as session:
+                    async with session.post(register_url, json=user_data) as response:
+                        if response.status == 200:
+                            self.logger.info(f"Successfully registered user: {username}")
+                            return True
+                        else:
+                            error_detail = await response.text()
+                            self.logger.error(f"Registration failed: {response.status} - {error_detail}")
+                            return False
+                            
+            except Exception as e:
+                self.logger.error(f"Registration error: {e}")
+                return False
 
     async def get_user_profile(self) -> Optional[Dict[str, Any]]:
         """
@@ -388,7 +473,7 @@ class ForensIQCLI:
             Analysis results or None if failed
         """
         if not self.session_token:
-            self.logger.error("No valid authentication token. Please login first.")
+            error_message("No valid authentication token. Please login first.")
             return None
         
         api_url = self.config.get('api_url', 'http://localhost:8000')
@@ -402,27 +487,39 @@ class ForensIQCLI:
                 'max_results': self.config.get('max_results', 5)
             }
             
-            self.logger.info(f"Sending {len(log_content)} characters of logs for analysis")
+            info_message(f"Sending {len(log_content):,} characters of logs for analysis")
             
-            async with aiohttp.ClientSession() as session:
-                async with session.post(
-                    f"{api_url}/api/v1/analyze", 
-                    json=request_data, 
-                    headers=headers
-                ) as response:
-                    if response.status == 200:
-                        result = await response.json()
-                        self.logger.info(f"Analysis completed successfully")
-                        
-                        # Store analysis result in cache
-                        await self._cache_analysis_result(log_content, result)
-                        
-                        return result
-                    else:
-                        error_detail = await response.text()
-                        self.logger.error(f"Analysis failed: {response.status} - {error_detail}")
-                        return None
-                        
+            with Progress(
+                SpinnerColumn(),
+                TextColumn("[progress.description]{task.description}"),
+                BarColumn(),
+                TaskProgressColumn(),
+                console=console
+            ) as progress:
+                task = progress.add_task("Analyzing logs...", total=100)
+                
+                async with aiohttp.ClientSession() as session:
+                    progress.update(task, advance=30)
+                    async with session.post(
+                        f"{api_url}/api/v1/analyze", 
+                        json=request_data, 
+                        headers=headers
+                    ) as response:
+                        progress.update(task, advance=40)
+                        if response.status == 200:
+                            result = await response.json()
+                            progress.update(task, advance=30, completed=100)
+                            self.logger.info(f"Analysis completed successfully")
+                            
+                            # Store analysis result in cache
+                            await self._cache_analysis_result(log_content, result)
+                            
+                            return result
+                        else:
+                            error_detail = await response.text()
+                            self.logger.error(f"Analysis failed: {response.status} - {error_detail}")
+                            return None
+                            
         except Exception as e:
             self.logger.error(f"Error sending logs: {e}")
             return None
@@ -469,7 +566,7 @@ class ForensIQCLI:
                 # Check if cache is still valid (e.g., less than 1 hour old)
                 cache_time = datetime.fromisoformat(cache_data['timestamp'])
                 if datetime.utcnow() - cache_time < timedelta(hours=1):
-                    self.logger.info("Using cached analysis result")
+                    info_message("Using cached analysis result")
                     return cache_data['result']
                     
         except Exception as e:
@@ -503,11 +600,11 @@ class ForensIQCLI:
                 
                 # If authentication failed, try to refresh token
                 if attempt < max_retries - 1:
-                    self.logger.warning(f"Attempt {attempt + 1} failed, retrying...")
+                    warning_message(f"Attempt {attempt + 1} failed, retrying...")
                     await asyncio.sleep(2 ** attempt)  # Exponential backoff
                     
             except Exception as e:
-                self.logger.error(f"Attempt {attempt + 1} failed: {e}")
+                error_message(f"Attempt {attempt + 1} failed: {e}")
                 if attempt < max_retries - 1:
                     await asyncio.sleep(2 ** attempt)
         
@@ -521,15 +618,15 @@ class ForensIQCLI:
             
             # Limit log size to 50KB as per API constraints
             if len(log_content) > 50000:
-                self.logger.warning("Log file too large, truncating to 50KB")
+                warning_message("Log file too large, truncating to 50KB")
                 log_content = log_content[:50000]
             
             # Use AI agent for enhanced analysis if available and enabled
             if use_ai_agent and self.ai_agent:
-                self.logger.info("Using AI Agent for enhanced analysis")
+                info_message("Using AI Agent for enhanced analysis")
                 result = await self.ai_agent.enhanced_analysis(log_content)
             else:
-                self.logger.info("Using standard API analysis")
+                info_message("Using standard API analysis")
                 result = await self.send_logs(log_content, enhance_with_ai)
             
             if result:
@@ -538,7 +635,7 @@ class ForensIQCLI:
                 result_file = self.logs_cache / f"analysis_{timestamp}.json"
                 async with aiofiles.open(result_file, 'w') as f:
                     await f.write(json.dumps(result, indent=2, default=str))
-                self.logger.info(f"Analysis result saved to: {result_file}")
+                success_message(f"Analysis result saved to: {result_file}")
                 
                 # Update adaptive scheduling if AI agent is used
                 if use_ai_agent and self.ai_agent and 'ai_agent_analysis' in result:
@@ -546,11 +643,11 @@ class ForensIQCLI:
                     if 'next_interval' in adaptive_config:
                         self.config['adaptive_interval'] = adaptive_config['next_interval']
                         self._save_config()
-                        self.logger.info(f"Updated adaptive interval: {adaptive_config['next_interval']}s")
+                        info_message(f"Updated adaptive interval: {adaptive_config['next_interval']}s")
             
             return result
         except Exception as e:
-            self.logger.error(f"Error reading log file {file_path}: {e}")
+            error_message(f"Error reading log file {file_path}: {e}")
             return None
     
     async def setup_dynamic_monitoring(self, sources: List[str] = None, interval: int = 300, 
@@ -569,16 +666,18 @@ class ForensIQCLI:
         """
         try:
             # Test API connection
-            profile = await self.get_user_profile()
-            if not profile:
-                self.logger.error("Cannot setup dynamic monitoring without valid authentication")
-                return False
+            with console.status("[bold blue]Testing API connection...", spinner="dots"):
+                profile = await self.get_user_profile()
+                if not profile:
+                    error_message("Cannot setup dynamic monitoring without valid authentication")
+                    return False
             
             # Get available log sources
-            available_sources = self.log_extractor.get_available_sources()
+            with console.status("[bold blue]Discovering log sources...", spinner="dots"):
+                available_sources = self.log_extractor.get_available_sources()
             
             if not available_sources:
-                self.logger.error("No log sources available on this system")
+                error_message("No log sources available on this system")
                 return False
             
             # Use all available sources if none specified
@@ -589,8 +688,8 @@ class ForensIQCLI:
                 available_ids = [source['id'] for source in available_sources]
                 invalid_sources = [s for s in sources if s not in available_ids]
                 if invalid_sources:
-                    self.logger.error(f"Invalid log sources: {invalid_sources}")
-                    self.logger.info(f"Available sources: {available_ids}")
+                    error_message(f"Invalid log sources: {invalid_sources}")
+                    info_message(f"Available sources: {available_ids}")
                     return False
             
             # Update configuration for dynamic monitoring
@@ -633,16 +732,16 @@ class ForensIQCLI:
             async with aiofiles.open(monitor_dir / "metadata.json", 'w') as f:
                 await f.write(json.dumps(monitoring_metadata, indent=2))
             
-            self.logger.info(f"Dynamic monitoring profile configured successfully")
-            self.logger.info(f"  Sources: {', '.join(sources)}")
-            self.logger.info(f"  Interval: {interval} seconds")
-            self.logger.info(f"  AI Agent: {'Enabled' if enable_ai_agent else 'Disabled'}")
-            self.logger.info(f"  Available sources: {len(available_sources)}")
+            success_message("Dynamic monitoring profile configured successfully!")
+            console.print(f"[dim]  Sources: {', '.join(sources)}[/dim]")
+            console.print(f"[dim]  Interval: {interval} seconds[/dim]")
+            console.print(f"[dim]  AI Agent: {'Enabled' if enable_ai_agent else 'Disabled'}[/dim]")
+            console.print(f"[dim]  Available sources: {len(available_sources)}[/dim]")
             
             return True
             
         except Exception as e:
-            self.logger.error(f"Failed to setup dynamic monitoring: {e}")
+            error_message(f"Failed to setup dynamic monitoring: {e}")
             return False
 
     def get_available_log_sources(self) -> List[Dict[str, Any]]:
@@ -661,7 +760,7 @@ class ForensIQCLI:
         """
         try:
             if not self.session_token:
-                self.logger.error("No valid authentication token. Please login first.")
+                error_message("No valid authentication token. Please login first.")
                 return None
             
             # Use configured sources if none specified
@@ -669,27 +768,27 @@ class ForensIQCLI:
                 dynamic_config = self.config.get('dynamic_monitoring', {})
                 sources = dynamic_config.get('sources', [])
                 if not sources:
-                    self.logger.error("No sources configured for dynamic monitoring")
+                    error_message("No sources configured for dynamic monitoring")
                     return None
             
             # Extract logs from system
-            self.logger.info(f"Extracting logs from sources: {', '.join(sources)}")
+            info_message(f"Extracting logs from sources: {', '.join(sources)}")
             extracted_logs = self.log_extractor.extract_logs(sources, time_range_minutes)
             
             # Check if any logs were extracted
             total_logs = sum(len(logs) for logs in extracted_logs.values())
             if total_logs == 0:
-                self.logger.info("No new logs found to analyze")
+                info_message("No new logs found to analyze")
                 return None
             
             # Format logs for analysis
             formatted_logs = self.log_extractor.format_logs_for_analysis(extracted_logs)
             
             if not formatted_logs.strip():
-                self.logger.info("No substantive log content to analyze")
+                info_message("No substantive log content to analyze")
                 return None
             
-            self.logger.info(f"Sending {len(formatted_logs)} characters of dynamic logs for analysis")
+            info_message(f"Sending {len(formatted_logs):,} characters of dynamic logs for analysis")
             
             # Send to ForensIQ API for analysis
             enhance_with_ai = self.config.get('dynamic_monitoring', {}).get('auto_enhance', True)
@@ -709,14 +808,14 @@ class ForensIQCLI:
                 # Cache the result with extraction metadata
                 await self._cache_dynamic_analysis_result(extracted_logs, result)
                 
-                self.logger.info("Dynamic log analysis completed successfully")
+                success_message("Dynamic log analysis completed successfully")
                 return result
             else:
-                self.logger.error("Failed to analyze extracted logs")
+                error_message("Failed to analyze extracted logs")
                 return None
                 
         except Exception as e:
-            self.logger.error(f"Error in dynamic log extraction and analysis: {e}")
+            error_message(f"Error in dynamic log extraction and analysis: {e}")
             return None
 
     async def _cache_dynamic_analysis_result(self, extracted_logs: Dict[str, List[Dict[str, Any]]], 
@@ -749,7 +848,7 @@ class ForensIQCLI:
         dynamic_config = self.config.get('dynamic_monitoring', {})
         
         if not dynamic_config.get('enabled'):
-            self.logger.error("Dynamic monitoring not configured. Use 'profile setup-dynamic' first.")
+            error_message("Dynamic monitoring not configured. Use 'profile setup-dynamic' first.")
             return
         
         sources = dynamic_config.get('sources', [])
@@ -760,13 +859,14 @@ class ForensIQCLI:
         # Connect to MongoDB
         if self.mongodb_service:
             try:
-                mongodb_connected = await self.mongodb_service.connect_async()
-                if not mongodb_connected:
-                    self.logger.warning("Failed to connect to MongoDB. Data will not be stored.")
+                with console.status("[bold blue]Connecting to MongoDB...", spinner="dots"):
+                    mongodb_connected = await self.mongodb_service.connect_async()
+                    if not mongodb_connected:
+                        warning_message("Failed to connect to MongoDB. Data will not be stored.")
             except Exception as e:
-                self.logger.warning(f"MongoDB connection error: {e}")
+                warning_message(f"MongoDB connection error: {e}")
         else:
-            self.logger.warning("MongoDB service not available. Data will not be stored.")
+            warning_message("MongoDB service not available. Data will not be stored.")
         
         # Create monitoring session in MongoDB
         session_id = None
@@ -777,12 +877,17 @@ class ForensIQCLI:
                 interval=base_interval
             )
         
-        self.logger.info(f"Starting dynamic monitoring...")
-        self.logger.info(f"  Session ID: {session_id}")
-        self.logger.info(f"  Sources: {', '.join(sources)}")
-        self.logger.info(f"  Base interval: {base_interval} seconds")
-        self.logger.info(f"  Extraction time range: {time_range} minutes")
-        self.logger.info(f"  MongoDB storage: ENABLED")
+        # Display monitoring start information
+        panel = Panel.fit(
+            f"[bold green]Dynamic Monitoring Started[/bold green]\n\n"
+            f"[cyan]Session ID:[/cyan] {session_id or 'N/A'}\n"
+            f"[cyan]Sources:[/cyan] {', '.join(sources)}\n"
+            f"[cyan]Base Interval:[/cyan] {base_interval} seconds\n"
+            f"[cyan]Extraction Range:[/cyan] {time_range} minutes\n"
+            f"[cyan]MongoDB Storage:[/cyan] {'✓ ENABLED' if self.mongodb_service else '✗ DISABLED'}",
+            border_style="green"
+        )
+        console.print(panel)
         
         monitoring_start_time = datetime.utcnow()
         analysis_count = 0
@@ -814,28 +919,44 @@ class ForensIQCLI:
                                     last_analysis=datetime.utcnow()
                                 )
                                 
-                                self.logger.info(f"✓ Analysis #{analysis_count} stored in MongoDB (ID: {analysis_id})")
+                                success_message(f"Analysis #{analysis_count} stored in MongoDB (ID: {analysis_id})")
                                 
                             except Exception as e:
-                                self.logger.error(f"Failed to store analysis in MongoDB: {e}")
+                                error_message(f"Failed to store analysis in MongoDB: {e}")
                         else:
-                            self.logger.debug(f"✓ Analysis #{analysis_count} completed (MongoDB storage unavailable)")
+                            info_message(f"Analysis #{analysis_count} completed (MongoDB storage unavailable)")
                         
-                        # Display summary
+                        # Display analysis summary in a colorful table
                         metadata = result.get('extraction_metadata', {})
-                        print(f"\n🔍 Dynamic Analysis Complete [{datetime.now().strftime('%H:%M:%S')}]")
+                        
+                        analysis_table = Table(title=f"🔍 Analysis #{analysis_count} Complete", box=box.ROUNDED)
+                        analysis_table.add_column("Metric", style="cyan")
+                        analysis_table.add_column("Value", style="green")
+                        
+                        analysis_table.add_row("Timestamp", datetime.now().strftime('%H:%M:%S'))
                         if session_id:
-                            print(f"  📊 Analysis #{analysis_count}")
-                            print(f"  📝 Session ID: {session_id}")
-                        print(f"  📋 Extracted: {metadata.get('total_log_entries', 0)} log entries")
-                        print(f"  🎯 Sources: {', '.join(metadata.get('sources_used', []))}")
-                        print(f"  💾 Stored in MongoDB: ✅")
+                            analysis_table.add_row("Session ID", str(session_id))
+                        analysis_table.add_row("Extracted Logs", f"{metadata.get('total_log_entries', 0):,}")
+                        analysis_table.add_row("Sources", ', '.join(metadata.get('sources_used', [])))
+                        analysis_table.add_row("MongoDB Storage", "✅" if self.mongodb_service else "❌")
+                        
+                        console.print(analysis_table)
                         
                         if 'matched_techniques' in result:
                             techniques = result['matched_techniques']
-                            print(f"  MITRE Techniques: {len(techniques)}")
-                            for tech in techniques[:3]:  # Show top 3
-                                print(f"    - {tech.get('technique_id')}: {tech.get('name')} (Score: {tech.get('relevance_score', 0):.2f})")
+                            if techniques:
+                                technique_table = Table(title="🎯 MITRE Techniques", box=box.SIMPLE)
+                                technique_table.add_column("ID", style="yellow")
+                                technique_table.add_column("Name", style="white")
+                                technique_table.add_column("Score", style="red")
+                                
+                                for tech in techniques[:3]:  # Show top 3
+                                    technique_table.add_row(
+                                        tech.get('technique_id', 'N/A'),
+                                        tech.get('name', 'N/A')[:40] + "..." if len(tech.get('name', '')) > 40 else tech.get('name', 'N/A'),
+                                        f"{tech.get('relevance_score', 0):.2f}"
+                                    )
+                                console.print(technique_table)
                         
                         # Adaptive scheduling with AI agent
                         if self.ai_agent:
@@ -845,29 +966,35 @@ class ForensIQCLI:
                             # Get adaptive interval
                             next_interval = self.ai_agent.adaptive_schedule_analysis(enhanced_result.get('threat_context'))
                             if next_interval != base_interval:
-                                print(f"  AI Agent: Adjusted interval to {next_interval}s based on threat level")
+                                info_message(f"AI Agent: Adjusted interval to {next_interval}s based on threat level")
                                 base_interval = next_interval
                     else:
-                        print(f"⏱️  No new logs to analyze [{datetime.now().strftime('%H:%M:%S')}]\n")
+                        console.print(f"[dim]⏱️  No new logs to analyze [{datetime.now().strftime('%H:%M:%S')}][/dim]")
                     
                 except Exception as e:
-                    self.logger.error(f"Error in monitoring cycle: {e}")
-                    print(f"❌ Monitoring cycle error: {e}")
+                    error_message(f"Error in monitoring cycle: {e}")
                 
                 # Calculate sleep time
                 cycle_duration = time.time() - cycle_start
                 sleep_time = max(base_interval - cycle_duration, 10)  # Minimum 10 seconds
                 
-                print(f"⏳ Next extraction in {sleep_time:.0f} seconds...")
+                console.print(f"[dim]⏳ Next extraction in {sleep_time:.0f} seconds...[/dim]")
                 await asyncio.sleep(sleep_time)
                 
         except KeyboardInterrupt:
             monitoring_duration = datetime.utcnow() - monitoring_start_time
-            print(f"\n🛑 Dynamic monitoring stopped (ran for {monitoring_duration})\n")
-            self.logger.info("Dynamic monitoring stopped by user")
+            
+            stop_panel = Panel.fit(
+                f"[bold red]Dynamic Monitoring Stopped[/bold red]\n\n"
+                f"[yellow]Runtime:[/yellow] {monitoring_duration}\n"
+                f"[yellow]Total Analyses:[/yellow] {analysis_count}\n"
+                f"[yellow]Session ID:[/yellow] {session_id or 'N/A'}",
+                border_style="red"
+            )
+            console.print(stop_panel)
+            
         except Exception as e:
-            self.logger.error(f"Dynamic monitoring error: {e}")
-            print(f"❌ Dynamic monitoring error: {e}")
+            error_message(f"Dynamic monitoring error: {e}")
     
     async def setup_monitoring_profile(self, log_path: str, interval: int, max_results: int = 5, 
                                      auto_enhance: bool = True, enable_ai_agent: bool = True) -> bool:
@@ -885,20 +1012,21 @@ class ForensIQCLI:
             bool: True if profile setup successful
         """
         try:
-            # Validate log file exists and is readable
-            if not Path(log_path).exists():
-                self.logger.error(f"Log file does not exist: {log_path}")
-                return False
+            with console.status("[bold blue]Setting up monitoring profile...", spinner="dots"):
+                # Validate log file exists and is readable
+                if not Path(log_path).exists():
+                    error_message(f"Log file does not exist: {log_path}")
+                    return False
+                    
+                if not os.access(log_path, os.R_OK):
+                    error_message(f"Cannot read log file: {log_path}")
+                    return False
                 
-            if not os.access(log_path, os.R_OK):
-                self.logger.error(f"Cannot read log file: {log_path}")
-                return False
-            
-            # Test API connection
-            profile = await self.get_user_profile()
-            if not profile:
-                self.logger.error("Cannot setup profile without valid authentication")
-                return False
+                # Test API connection
+                profile = await self.get_user_profile()
+                if not profile:
+                    error_message("Cannot setup profile without valid authentication")
+                    return False
             
             # Update configuration
             self.config.update({
@@ -939,15 +1067,15 @@ class ForensIQCLI:
             async with aiofiles.open(monitor_dir / "profile.json", 'w') as f:
                 await f.write(json.dumps(profile_metadata, indent=2))
             
-            self.logger.info(f"Monitoring profile configured successfully")
-            self.logger.info(f"  Log file: {log_path}")
-            self.logger.info(f"  Interval: {interval} seconds")
-            self.logger.info(f"  AI Agent: {'Enabled' if enable_ai_agent else 'Disabled'}")
+            success_message("Monitoring profile configured successfully!")
+            console.print(f"[dim]  Log file: {log_path}[/dim]")
+            console.print(f"[dim]  Interval: {interval} seconds[/dim]")
+            console.print(f"[dim]  AI Agent: {'Enabled' if enable_ai_agent else 'Disabled'}[/dim]")
             
             return True
             
         except Exception as e:
-            self.logger.error(f"Failed to setup monitoring profile: {e}")
+            error_message(f"Failed to setup monitoring profile: {e}")
             return False
 
     async def get_profile_status(self) -> Dict[str, Any]:
@@ -1032,11 +1160,11 @@ class ForensIQCLI:
                     self.config['ai_agent_enabled'] = False
             
             self._save_config()
-            self.logger.info("Profile settings updated successfully")
+            success_message("Profile settings updated successfully")
             return True
             
         except Exception as e:
-            self.logger.error(f"Failed to update profile settings: {e}")
+            error_message(f"Failed to update profile settings: {e}")
             return False
     
     async def retrieve_analysis_data(self, limit: int = 10, user_filter: str = None) -> List[Dict[str, Any]]:
@@ -1067,7 +1195,7 @@ class ForensIQCLI:
             return results
             
         except Exception as e:
-            self.logger.error(f"Failed to retrieve analysis data: {e}")
+            error_message(f"Failed to retrieve analysis data: {e}")
             return []
 
     async def retrieve_monitoring_sessions(self, limit: int = 10) -> List[Dict[str, Any]]:
@@ -1096,7 +1224,7 @@ class ForensIQCLI:
             return sessions
             
         except Exception as e:
-            self.logger.error(f"Error retrieving monitoring sessions: {e}")
+            error_message(f"Error retrieving monitoring sessions: {e}")
             return []
 
     async def get_collection_stats(self) -> Dict[str, Any]:
@@ -1120,7 +1248,7 @@ class ForensIQCLI:
             return stats
             
         except Exception as e:
-            self.logger.error(f"Error retrieving collection stats: {e}")
+            error_message(f"Error retrieving collection stats: {e}")
             return {
                 'error': str(e),
                 'connection_status': 'failed'
@@ -1129,72 +1257,104 @@ class ForensIQCLI:
     def display_analysis_data(self, data: List[Dict[str, Any]]) -> None:
         """Display analysis data in a formatted way."""
         if not data:
-            print("No analysis data found.")
+            info_message("No analysis data found.")
             return
         
-        print(f"\n📊 Analysis Data ({len(data)} records):")
-        print("=" * 80)
+        section_header("Analysis Data", "📊")
         
         for i, record in enumerate(data, 1):
-            print(f"\n{i}. Analysis ID: {record.get('_id', 'N/A')}")
-            print(f"   User: {record.get('username', 'N/A')}")
-            print(f"   Timestamp: {record.get('timestamp', 'N/A')}")
-            print(f"   Log Source: {record.get('log_source', 'N/A')}")
-            print(f"   Summary: {record.get('summary', 'N/A')[:100]}...")
+            analysis_panel = Panel.fit(
+                f"[bold cyan]Analysis #{i}[/bold cyan]\n\n"
+                f"[yellow]ID:[/yellow] {record.get('_id', 'N/A')}\n"
+                f"[yellow]User:[/yellow] {record.get('username', 'N/A')}\n"
+                f"[yellow]Timestamp:[/yellow] {record.get('timestamp', 'N/A')}\n"
+                f"[yellow]Log Source:[/yellow] {record.get('log_source', 'N/A')}\n"
+                f"[yellow]Summary:[/yellow] {record.get('summary', 'N/A')[:100]}...",
+                border_style="blue"
+            )
+            console.print(analysis_panel)
             
             techniques = record.get('matched_techniques', [])
             if techniques:
-                print(f"   MITRE Techniques ({len(techniques)}):")
+                technique_table = Table(title="MITRE Techniques", box=box.SIMPLE)
+                technique_table.add_column("ID", style="yellow")
+                technique_table.add_column("Name", style="white")
+                technique_table.add_column("Score", style="red")
+                
                 for tech in techniques[:3]:  # Show first 3 techniques
-                    print(f"     • {tech.get('technique_id', 'N/A')}: {tech.get('name', 'N/A')}")
-                if len(techniques) > 3:
-                    print(f"     ... and {len(techniques) - 3} more")
+                    technique_table.add_row(
+                        tech.get('technique_id', 'N/A'),
+                        tech.get('name', 'N/A')[:50],
+                        f"{tech.get('relevance_score', 0):.2f}"
+                    )
+                console.print(technique_table)
             
             if record.get('ai_enhanced'):
-                print(f"   AI Enhanced: ✓")
+                console.print("[green]✓ AI Enhanced[/green]")
                 if record.get('threat_score'):
-                    print(f"   Threat Score: {record.get('threat_score'):.2f}")
+                    console.print(f"[red]Threat Score: {record.get('threat_score'):.2f}[/red]")
+            
+            console.print()  # Add spacing
 
     def display_monitoring_sessions(self, sessions: List[Dict[str, Any]]) -> None:
         """Display monitoring sessions in a formatted way."""
         if not sessions:
-            print("No monitoring sessions found.")
+            info_message("No monitoring sessions found.")
             return
         
-        print(f"\n🔍 Monitoring Sessions ({len(sessions)} records):")
-        print("=" * 80)
+        section_header("Monitoring Sessions", "🔍")
         
-        for i, session in enumerate(sessions, 1):
-            print(f"\n{i}. Session ID: {session.get('_id', 'N/A')}")
-            print(f"   User: {session.get('username', 'N/A')}")
-            print(f"   Started: {session.get('start_time', 'N/A')}")
-            print(f"   Status: {session.get('status', 'N/A')}")
-            print(f"   Interval: {session.get('interval', 'N/A')} seconds")
+        sessions_table = Table(box=box.ROUNDED, border_style="bright_blue")
+        sessions_table.add_column("Session ID", style="cyan", no_wrap=True)
+        sessions_table.add_column("User", style="green")
+        sessions_table.add_column("Started", style="yellow")
+        sessions_table.add_column("Status", style="white")
+        sessions_table.add_column("Sources", style="magenta")
+        sessions_table.add_column("Analyses", style="red")
+        
+        for session in sessions:
+            status = session.get('status', 'N/A')
+            status_color = "green" if status == "active" else "red" if status == "stopped" else "yellow"
             
             sources = session.get('log_sources', [])
-            if sources:
-                print(f"   Log Sources: {', '.join(sources)}")
+            sources_str = ', '.join(sources[:2]) + ("..." if len(sources) > 2 else "")
             
-            print(f"   Total Analyses: {session.get('total_analyses', 0)}")
-            if session.get('last_analysis'):
-                print(f"   Last Analysis: {session.get('last_analysis')}")
+            sessions_table.add_row(
+                str(session.get('_id', 'N/A'))[:8] + "...",
+                session.get('username', 'N/A'),
+                session.get('start_time', 'N/A'),
+                f"[{status_color}]{status}[/{status_color}]",
+                sources_str,
+                str(session.get('total_analyses', 0))
+            )
+        
+        console.print(sessions_table)
 
     def display_collection_stats(self, stats: Dict[str, Any]) -> None:
         """Display collection statistics in a formatted way."""
         if not stats:
-            print("No statistics available.")
+            info_message("No statistics available.")
             return
         
-        print("\n📈 MongoDB Collection Statistics:")
-        print("=" * 50)
+        section_header("MongoDB Collection Statistics", "📈")
+        
+        stats_table = Table(box=box.ROUNDED, border_style="bright_green")
+        stats_table.add_column("Collection", style="cyan", no_wrap=True)
+        stats_table.add_column("Records", style="yellow", justify="right")
+        stats_table.add_column("Storage Size", style="green", justify="right")
+        stats_table.add_column("Last Updated", style="blue")
         
         for collection, data in stats.items():
             if isinstance(data, dict):
-                print(f"\n🗃️  {collection.replace('_', ' ').title()}:")
-                print(f"   Total Records: {data.get('count', 0):,}")
-                print(f"   Storage Size: {data.get('size', 0):,} bytes")
-                if data.get('last_updated'):
-                    print(f"   Last Updated: {data.get('last_updated')}")
+                size_mb = data.get('size', 0) / 1024 / 1024
+                stats_table.add_row(
+                    collection.replace('_', ' ').title(),
+                    f"{data.get('count', 0):,}",
+                    f"{size_mb:.2f} MB",
+                    data.get('last_updated', 'N/A')
+                )
+        
+        console.print(stats_table)
 
     async def export_collection_data(self, collection_type: str, output_file: str, 
                                    limit: int = None, format_type: str = 'json') -> bool:
@@ -1211,43 +1371,44 @@ class ForensIQCLI:
             bool: True if export successful
         """
         try:
-            if collection_type == 'analysis':
-                data = await self.retrieve_analysis_data(limit or 1000)
-            elif collection_type == 'monitoring':
-                data = await self.retrieve_monitoring_sessions(limit or 1000)
-            else:
-                self.logger.error(f"Invalid collection type: {collection_type}")
-                return False
+            with console.status(f"[bold blue]Exporting {collection_type} data...", spinner="dots"):
+                if collection_type == 'analysis':
+                    data = await self.retrieve_analysis_data(limit or 1000)
+                elif collection_type == 'monitoring':
+                    data = await self.retrieve_monitoring_sessions(limit or 1000)
+                else:
+                    error_message(f"Invalid collection type: {collection_type}")
+                    return False
+                
+                if not data:
+                    warning_message("No data to export")
+                    return False
+                
+                if format_type == 'json':
+                    import json
+                    with open(output_file, 'w') as f:
+                        json.dump(data, f, indent=2, default=str)
+                elif format_type == 'csv':
+                    import csv
+                    if data:
+                        with open(output_file, 'w', newline='') as f:
+                            writer = csv.DictWriter(f, fieldnames=data[0].keys())
+                            writer.writeheader()
+                            for row in data:
+                                # Convert complex fields to strings
+                                csv_row = {}
+                                for k, v in row.items():
+                                    if isinstance(v, (list, dict)):
+                                        csv_row[k] = str(v)
+                                    else:
+                                        csv_row[k] = v
+                                writer.writerow(csv_row)
             
-            if not data:
-                self.logger.warning("No data to export")
-                return False
-            
-            if format_type == 'json':
-                import json
-                with open(output_file, 'w') as f:
-                    json.dump(data, f, indent=2, default=str)
-            elif format_type == 'csv':
-                import csv
-                if data:
-                    with open(output_file, 'w', newline='') as f:
-                        writer = csv.DictWriter(f, fieldnames=data[0].keys())
-                        writer.writeheader()
-                        for row in data:
-                            # Convert complex fields to strings
-                            csv_row = {}
-                            for k, v in row.items():
-                                if isinstance(v, (list, dict)):
-                                    csv_row[k] = str(v)
-                                else:
-                                    csv_row[k] = v
-                            writer.writerow(csv_row)
-            
-            self.logger.info(f"Exported {len(data)} records to {output_file}")
+            success_message(f"Exported {len(data):,} records to {output_file}")
             return True
             
         except Exception as e:
-            self.logger.error(f"Error exporting data: {e}")
+            error_message(f"Error exporting data: {e}")
             return False
     
     def setup_profile(self, log_path: str, interval: int, max_results: int = 5, auto_enhance: bool = True) -> None:
@@ -1260,7 +1421,7 @@ class ForensIQCLI:
             'profile_updated': datetime.utcnow().isoformat()
         })
         self._save_config()
-        self.logger.info(f"Profile configured: log_path={log_path}, interval={interval}s")
+        success_message(f"Profile configured: log_path={log_path}, interval={interval}s")
     
     async def monitor_logs(self) -> None:
         """Monitor log file and send updates at configured intervals with MongoDB storage."""
@@ -1268,18 +1429,18 @@ class ForensIQCLI:
         base_interval = self.config.get('monitoring', {}).get('interval', 300)  # Default 5 minutes
         
         if not log_path or not os.path.exists(log_path):
-            self.logger.error(f"Log file not found: {log_path}")
+            error_message(f"Log file not found: {log_path}")
             return
         
         # Create monitoring session in database
         session_id = await self._create_monitoring_session(log_path, base_interval)
         if not session_id:
-            self.logger.error("Failed to create monitoring session")
+            error_message("Failed to create monitoring session")
             return
         
-        self.logger.info(f"Starting log monitoring session: {session_id}")
-        self.logger.info(f"Log file: {log_path}")
-        self.logger.info(f"Base interval: {base_interval} seconds")
+        info_message(f"Starting log monitoring session: {session_id}")
+        info_message(f"Log file: {log_path}")
+        info_message(f"Base interval: {base_interval} seconds")
         
         last_position = self.config.get('last_file_position', 0)
         consecutive_errors = 0
@@ -1290,7 +1451,7 @@ class ForensIQCLI:
                 try:
                     # Check if file still exists
                     if not os.path.exists(log_path):
-                        self.logger.error(f"Log file disappeared: {log_path}")
+                        error_message(f"Log file disappeared: {log_path}")
                         break
                     
                     # Read new content from file
@@ -1303,7 +1464,7 @@ class ForensIQCLI:
                             new_content = f.read()
                         
                         if new_content.strip():
-                            self.logger.info(f"Processing {len(new_content)} new characters from log")
+                            info_message(f"Processing {len(new_content):,} new characters from log")
                             
                             # Analyze logs with AI agent enhancement
                             result = await self.analyze_logs_with_storage(
@@ -1322,7 +1483,7 @@ class ForensIQCLI:
                                 consecutive_errors = 0
                                 
                                 # Log successful analysis
-                                self.logger.info(f"Analysis completed and stored in MongoDB")
+                                success_message("Analysis completed and stored in MongoDB")
                                 
                                 # Determine next interval based on AI agent feedback
                                 next_interval = base_interval
@@ -1332,13 +1493,13 @@ class ForensIQCLI:
                                     next_interval = adaptive_scheduling.get('next_interval', base_interval)
                                     
                                     threat_level = ai_analysis.get('threat_context', {}).get('severity_level', 'low')
-                                    self.logger.info(f"Threat level: {threat_level}, next interval: {next_interval}s")
+                                    info_message(f"Threat level: {threat_level}, next interval: {next_interval}s")
                                 
                                 # Wait for next interval
                                 await asyncio.sleep(next_interval)
                             else:
                                 consecutive_errors += 1
-                                self.logger.error(f"Analysis failed (error {consecutive_errors}/{max_errors})")
+                                error_message(f"Analysis failed (error {consecutive_errors}/{max_errors})")
                                 await asyncio.sleep(base_interval)
                         else:
                             # No new content, wait shorter interval
@@ -1346,7 +1507,7 @@ class ForensIQCLI:
                     
                     elif current_size < last_position:
                         # File was truncated or rotated
-                        self.logger.info("Log file was truncated or rotated, resetting position")
+                        info_message("Log file was truncated or rotated, resetting position")
                         last_position = 0
                         self.config['last_file_position'] = 0
                         self._save_config()
@@ -1357,10 +1518,10 @@ class ForensIQCLI:
                 
                 except Exception as e:
                     consecutive_errors += 1
-                    self.logger.error(f"Error during monitoring (attempt {consecutive_errors}/{max_errors}): {e}")
+                    error_message(f"Error during monitoring (attempt {consecutive_errors}/{max_errors}): {e}")
                     
                     if consecutive_errors >= max_errors:
-                        self.logger.error("Too many consecutive errors, stopping monitoring")
+                        error_message("Too many consecutive errors, stopping monitoring")
                         break
                     
                     # Wait before retry with exponential backoff
@@ -1368,19 +1529,19 @@ class ForensIQCLI:
                     await asyncio.sleep(wait_time)
         
         except KeyboardInterrupt:
-            self.logger.info("Monitoring stopped by user")
+            info_message("Monitoring stopped by user")
         except Exception as e:
-            self.logger.error(f"Fatal error in monitoring: {e}")
+            error_message(f"Fatal error in monitoring: {e}")
         finally:
             # Stop monitoring session in database
             await self._stop_monitoring_session(session_id)
-            self.logger.info("Monitoring session ended")
+            info_message("Monitoring session ended")
 
     async def _create_monitoring_session(self, log_path: str, interval: int) -> Optional[str]:
         """Create monitoring session in the database."""
         try:
             if not self.session_token:
-                self.logger.error("No authentication token available")
+                error_message("No authentication token available")
                 return None
             
             api_url = self.config.get('api_url', 'http://localhost:8000')
@@ -1402,10 +1563,10 @@ class ForensIQCLI:
                         result = await response.json()
                         return result.get('session_id')
                     else:
-                        self.logger.error(f"Failed to create monitoring session: {response.status}")
+                        error_message(f"Failed to create monitoring session: {response.status}")
                         return None
         except Exception as e:
-            self.logger.error(f"Error creating monitoring session: {e}")
+            error_message(f"Error creating monitoring session: {e}")
             return None
     
     async def _stop_monitoring_session(self, session_id: str) -> None:
@@ -1423,11 +1584,11 @@ class ForensIQCLI:
                     headers=headers
                 ) as response:
                     if response.status == 200:
-                        self.logger.info("Monitoring session stopped successfully")
+                        success_message("Monitoring session stopped successfully")
                     else:
-                        self.logger.warning(f"Failed to stop monitoring session: {response.status}")
+                        warning_message(f"Failed to stop monitoring session: {response.status}")
         except Exception as e:
-            self.logger.error(f"Error stopping monitoring session: {e}")
+            error_message(f"Error stopping monitoring session: {e}")
 
     async def analyze_logs_with_storage(self, log_content: str, session_id: Optional[str] = None, 
                                       log_file_path: Optional[str] = None) -> Optional[Dict[str, Any]]:
@@ -1457,7 +1618,7 @@ class ForensIQCLI:
             return None
             
         except Exception as e:
-            self.logger.error(f"Error in analyze_logs_with_storage: {e}")
+            error_message(f"Error in analyze_logs_with_storage: {e}")
             return None
     
     async def _store_analysis_result(self, analysis_result: Dict[str, Any], log_content: str,
@@ -1487,36 +1648,44 @@ class ForensIQCLI:
                         result = await response.json()
                         self.logger.debug(f"Analysis stored with ID: {result.get('analysis_id')}")
                     else:
-                        self.logger.warning(f"Failed to store analysis: {response.status}")
+                        warning_message(f"Failed to store analysis: {response.status}")
                         
         except Exception as e:
-            self.logger.error(f"Error storing analysis result: {e}")
+            error_message(f"Error storing analysis result: {e}")
 
     async def start_background_monitoring(self) -> None:
         """Start background monitoring with 5-minute intervals."""
         monitoring_config = self.config.get('monitoring', {})
         
         if not monitoring_config:
-            self.logger.error("No monitoring configuration found. Please setup profile first.")
+            error_message("No monitoring configuration found. Please setup profile first.")
             return
         
         log_path = monitoring_config.get('log_path')
         interval = monitoring_config.get('interval', 300)  # Default 5 minutes
         
         if not log_path or not os.path.exists(log_path):
-            self.logger.error(f"Log file not found: {log_path}")
+            error_message(f"Log file not found: {log_path}")
             return
         
-        self.logger.info(f"Starting background monitoring with {interval} second intervals")
-        self.logger.info(f"Monitoring file: {log_path}")
-        self.logger.info("Press Ctrl+C to stop monitoring")
+        # Display monitoring start panel
+        monitoring_panel = Panel.fit(
+            f"[bold green]Background Monitoring Started[/bold green]\n\n"
+            f"[cyan]File:[/cyan] {log_path}\n"
+            f"[cyan]Interval:[/cyan] {interval} seconds\n"
+            f"[cyan]AI Enhancement:[/cyan] {'✓ Enabled' if monitoring_config.get('auto_enhance') else '✗ Disabled'}\n"
+            f"[cyan]AI Agent:[/cyan] {'✓ Enabled' if monitoring_config.get('enable_ai_agent') else '✗ Disabled'}",
+            border_style="green"
+        )
+        console.print(monitoring_panel)
+        console.print("[dim]Press Ctrl+C to stop monitoring[/dim]")
         
         try:
             await self.monitor_logs()
         except KeyboardInterrupt:
-            self.logger.info("Monitoring stopped by user")
+            info_message("Monitoring stopped by user")
         except Exception as e:
-            self.logger.error(f"Monitoring error: {e}")
+            error_message(f"Monitoring error: {e}")
     
     def schedule_analysis(self, cron_expression: str = None) -> None:
         """Schedule periodic log analysis using schedule library."""
@@ -1524,7 +1693,7 @@ class ForensIQCLI:
         log_path = self.config.get('log_path')
         
         if not log_path:
-            self.logger.error("Log path not configured")
+            error_message("Log path not configured")
             return
         
         def run_analysis():
@@ -1534,23 +1703,23 @@ class ForensIQCLI:
             try:
                 result = loop.run_until_complete(self.send_log_file(log_path))
                 if result:
-                    self.logger.info("Scheduled analysis completed successfully")
+                    success_message("Scheduled analysis completed successfully")
             except Exception as e:
-                self.logger.error(f"Scheduled analysis failed: {e}")
+                error_message(f"Scheduled analysis failed: {e}")
             finally:
                 loop.close()
         
         # Schedule based on interval
         schedule.every(interval).seconds.do(run_analysis)
         
-        self.logger.info(f"Scheduled analysis every {interval} seconds")
+        info_message(f"Scheduled analysis every {interval} seconds")
         
         try:
             while True:
                 schedule.run_pending()
                 time.sleep(1)
         except KeyboardInterrupt:
-            self.logger.info("Scheduler stopped by user")
+            info_message("Scheduler stopped by user")
 
 def main():
     """Main CLI entry point."""
@@ -1663,8 +1832,12 @@ def main():
     args = parser.parse_args()
     
     if not args.command:
+        print_banner()
         parser.print_help()
         return
+    
+    # Print banner for all commands
+    print_banner()
     
     cli = ForensIQCLI()
     
@@ -1674,47 +1847,49 @@ def main():
             # Only try auto-login for commands that need authentication
             needs_auth_commands = ['monitor', 'analyze', 'profile', 'agent', 'data']
             if args.command in needs_auth_commands:
-                password = getpass.getpass(f"Password to decrypt stored credentials for {cli._stored_username}: ")
+                password = getpass.getpass(f"🔑 Password to decrypt stored credentials for {cli._stored_username}: ")
                 cli.encryption_key = cli._generate_encryption_key(password)
                 if cli._load_stored_token():
-                    print(f"✓ Automatically logged in as {cli._stored_username}")
+                    success_message(f"Automatically logged in as {cli._stored_username}")
     
     # Handle commands
     if args.command == 'auth':
         if args.auth_command == 'login':
-            password = args.password or getpass.getpass("Password: ")
+            password = args.password or getpass.getpass("🔑 Password: ")
             success = asyncio.run(cli.authenticate(args.username, password, args.api_url))
             if success:
-                print("✓ Authentication successful!")
+                success_message("Authentication successful!")
             else:
-                print("✗ Authentication failed!")
+                error_message("Authentication failed!")
                 sys.exit(1)
         
         elif args.auth_command == 'register':
-            password = args.password or getpass.getpass("Password: ")
-            confirm_password = getpass.getpass("Confirm password: ")
+            password = args.password or getpass.getpass("🔑 Password: ")
+            confirm_password = getpass.getpass("🔑 Confirm password: ")
             
             if password != confirm_password:
-                print("✗ Passwords do not match!")
+                error_message("Passwords do not match!")
                 sys.exit(1)
             
             success = asyncio.run(cli.register_user(args.username, args.email, password))
             if success:
-                print("✓ Registration successful!")
-                print("You can now login with your credentials.")
+                success_message("Registration successful!")
+                info_message("You can now login with your credentials.")
             else:
-                print("✗ Registration failed!")
+                error_message("Registration failed!")
                 sys.exit(1)
         
         elif args.auth_command == 'profile':
             profile = asyncio.run(cli.get_user_profile())
             if profile:
-                print("\n📋 User Profile:")
-                print(f"  Username: {profile.get('username')}")
-                print(f"  Email: {profile.get('email')}")
-                print("✓ Profile retrieved successfully!")
+                profile_table = create_status_table({
+                    'username': profile.get('username'),
+                    'email': profile.get('email')
+                }, "👤 User Profile")
+                console.print(profile_table)
+                success_message("Profile retrieved successfully!")
             else:
-                print("✗ Failed to retrieve profile. Please check authentication.")
+                error_message("Failed to retrieve profile. Please check authentication.")
                 sys.exit(1)
     
     elif args.command == 'profile':
@@ -1722,26 +1897,39 @@ def main():
             success = asyncio.run(cli.setup_monitoring_profile(
                 args.log_path, 
                 args.interval, 
-                args.max_results, 
+                args.max_results,
                 not args.no_enhance,
                 not args.no_ai_agent
             ))
             if success:
-                print(f"✓ Monitoring profile configured successfully!")
-                print(f"  Log file: {args.log_path}")
-                print(f"  Interval: {args.interval} seconds")
-                print(f"  AI Enhancement: {'Enabled' if not args.no_enhance else 'Disabled'}")
-                print(f"  AI Agent: {'Enabled' if not args.no_ai_agent else 'Disabled'}")
+                profile_data = {
+                    'log_file': args.log_path,
+                    'interval': f"{args.interval} seconds",
+                    'ai_enhancement': not args.no_enhance,
+                    'ai_agent': not args.no_ai_agent
+                }
+                profile_table = create_status_table(profile_data, "📋 Monitoring Profile")
+                console.print(profile_table)
             else:
-                print("✗ Failed to setup monitoring profile!")
+                error_message("Failed to setup monitoring profile!")
                 sys.exit(1)
         
         elif args.profile_command == 'setup-dynamic':
             if args.list_sources:
                 sources = cli.get_available_log_sources()
-                print("\n📋 Available Log Sources:")
+                
+                sources_table = Table(title="📋 Available Log Sources", box=box.ROUNDED)
+                sources_table.add_column("ID", style="cyan")
+                sources_table.add_column("Description", style="white")
+                sources_table.add_column("Type", style="green")
+                
                 for source in sources:
-                    print(f"  • {source['id']}: {source['description']} ({source['type']})")
+                    sources_table.add_row(
+                        source['id'],
+                        source['description'],
+                        source['type']
+                    )
+                console.print(sources_table)
                 return
             
             success = asyncio.run(cli.setup_dynamic_monitoring(
@@ -1751,41 +1939,52 @@ def main():
                 not args.no_ai_agent
             ))
             if success:
-                print(f"✓ Dynamic monitoring profile configured successfully!")
-                if args.sources:
-                    print(f"  Sources: {', '.join(args.sources)}")
-                else:
-                    print(f"  Sources: All available")
-                print(f"  Interval: {args.interval} seconds")
-                print(f"  AI Enhancement: {'Enabled' if not args.no_enhance else 'Disabled'}")
-                print(f"  AI Agent: {'Enabled' if not args.no_ai_agent else 'Disabled'}")
+                dynamic_data = {
+                    'sources': ', '.join(args.sources) if args.sources else 'All available',
+                    'interval': f"{args.interval} seconds",
+                    'ai_enhancement': not args.no_enhance,
+                    'ai_agent': not args.no_ai_agent
+                }
+                dynamic_table = create_status_table(dynamic_data, "🔄 Dynamic Monitoring Profile")
+                console.print(dynamic_table)
             else:
-                print("✗ Failed to setup dynamic monitoring profile!")
+                error_message("Failed to setup dynamic monitoring profile!")
                 sys.exit(1)
         
         elif args.profile_command == 'status':
             status = asyncio.run(cli.get_profile_status())
-            print("\n📊 Profile Status:")
-            print(f"  Status: {status.get('status')}")
             
             if status.get('status') == 'active':
-                print(f"  User: {status.get('user')} ({status.get('email')})")
-                print(f"  Log Path: {status.get('log_path')}")
-                print(f"  Interval: {status.get('interval')} seconds")
-                print(f"  Max Results: {status.get('max_results')}")
-                print(f"  AI Enhancement: {'Enabled' if status.get('auto_enhance') else 'Disabled'}")
-                print(f"  AI Agent: {'Enabled' if status.get('ai_agent_enabled') else 'Disabled'}")
+                status_data = {
+                    'status': status.get('status'),
+                    'user': f"{status.get('user')} ({status.get('email')})",
+                    'log_path': status.get('log_path'),
+                    'interval': f"{status.get('interval')} seconds",
+                    'max_results': status.get('max_results'),
+                    'ai_enhancement': status.get('auto_enhance'),
+                    'ai_agent_enabled': status.get('ai_agent_enabled')
+                }
                 
                 if status.get('log_file_size'):
-                    print(f"  Log File Size: {status.get('log_file_size'):,} bytes")
-                    print(f"  Last Modified: {status.get('log_file_modified')}")
+                    status_data['log_file_size'] = f"{status.get('log_file_size'):,} bytes"
+                    status_data['last_modified'] = status.get('log_file_modified')
+                
+                status_table = create_status_table(status_data, "📊 Profile Status")
+                console.print(status_table)
                 
                 if status.get('ai_agent_status'):
                     agent_status = status['ai_agent_status']
-                    print(f"  AI Agent Patterns: {agent_status.get('learned_patterns')}")
-                    print(f"  Total Analyses: {agent_status.get('total_analyses')}")
+                    agent_table = create_status_table({
+                        'learned_patterns': agent_status.get('learned_patterns'),
+                        'total_analyses': agent_status.get('total_analyses'),
+                        'recent_analyses_24h': agent_status.get('recent_analyses_24h'),
+                        'threat_history': agent_status.get('threat_history_count')
+                    }, "🤖 AI Agent Status")
+                    console.print(agent_table)
             else:
-                print(f"  Message: {status.get('message', 'Unknown error')}")
+                error_message(f"Profile status: {status.get('status')}")
+                if status.get('message'):
+                    console.print(f"[dim]{status.get('message')}[/dim]")
         
         elif args.profile_command == 'update':
             updates = {}
@@ -1805,47 +2004,52 @@ def main():
             if updates:
                 success = asyncio.run(cli.update_profile_settings(**updates))
                 if success:
-                    print("✓ Profile settings updated successfully!")
-                    for key, value in updates.items():
-                        print(f"  {key}: {value}")
+                    update_table = create_status_table(updates, "🔧 Profile Updates")
+                    console.print(update_table)
                 else:
-                    print("✗ Failed to update profile settings!")
+                    error_message("Failed to update profile settings!")
                     sys.exit(1)
             else:
-                print("No settings to update. Use --help for available options.")
+                info_message("No settings to update. Use --help for available options.")
     
     elif args.command == 'send':
         # Check authentication
         if not cli.session_token:
-            password = getpass.getpass("Password to decrypt stored credentials: ")
+            password = getpass.getpass("🔑 Password to decrypt stored credentials: ")
             credentials = cli._load_credentials(password)
             if not credentials:
-                print("✗ No valid credentials found. Please login first.")
+                error_message("No valid credentials found. Please login first.")
                 sys.exit(1)
         
         result = asyncio.run(cli.send_log_file(args.file, not args.no_enhance))
         if result:
-            print("✓ Log analysis completed!")
-            print(f"Summary: {result.get('summary', 'N/A')}")
-            print(f"Techniques: {len(result.get('matched_techniques', []))}")
+            success_message("Log analysis completed!")
+            
+            analysis_summary = {
+                'summary': result.get('summary', 'N/A')[:100] + '...',
+                'techniques_found': len(result.get('matched_techniques', [])),
+                'ai_enhanced': result.get('ai_enhanced', False)
+            }
+            summary_table = create_status_table(analysis_summary, "📊 Analysis Summary")
+            console.print(summary_table)
         else:
-            print("✗ Analysis failed!")
+            error_message("Analysis failed!")
     
     elif args.command == 'monitor':
         if args.dynamic:
             # Check authentication
             if not cli.session_token:
-                password = getpass.getpass("Password to decrypt stored credentials: ")
+                password = getpass.getpass("🔑 Password to decrypt stored credentials: ")
                 credentials = cli._load_credentials(password)
                 if not credentials:
-                    print("✗ No valid credentials found. Please login first.")
+                    error_message("No valid credentials found. Please login first.")
                     sys.exit(1)
             
-            print("🚀 Starting dynamic system log monitoring...")
-            print("📊 Logs will be extracted from system sources every 5 minutes")
-            print("🔄 Data will be automatically sent to ForensIQ and stored in MongoDB")
-            print("🤖 AI Agent will provide enhanced analysis and adaptive scheduling")
-            print("\nPress Ctrl+C to stop monitoring")
+            section_header("Dynamic System Log Monitoring", "🚀")
+            console.print("[dim]📊 Logs will be extracted from system sources every 5 minutes[/dim]")
+            console.print("[dim]🔄 Data will be automatically sent to ForensIQ and stored in MongoDB[/dim]")
+            console.print("[dim]🤖 AI Agent will provide enhanced analysis and adaptive scheduling[/dim]")
+            console.print("[dim]Press Ctrl+C to stop monitoring[/dim]\n")
             
             # If interval is specified, update config temporarily
             if args.interval:
@@ -1853,12 +2057,12 @@ def main():
                 if 'dynamic_monitoring' not in cli.config:
                     cli.config['dynamic_monitoring'] = {}
                 cli.config['dynamic_monitoring']['interval'] = args.interval
-                print(f"⏱️  Using custom interval: {args.interval} seconds")
+                info_message(f"Using custom interval: {args.interval} seconds")
             
             try:
                 asyncio.run(cli.start_dynamic_monitoring())
             except KeyboardInterrupt:
-                print("\n🛑 Monitoring stopped by user")
+                console.print("\n[bold red]🛑 Monitoring stopped by user[/bold red]")
             finally:
                 # Restore original interval if it was changed
                 if args.interval and 'original_interval' in locals():
@@ -1867,105 +2071,129 @@ def main():
         elif args.start:
             # Check authentication
             if not cli.session_token:
-                password = getpass.getpass("Password to decrypt stored credentials: ")
+                password = getpass.getpass("🔑 Password to decrypt stored credentials: ")
                 credentials = cli._load_credentials(password)
                 if not credentials:
-                    print("✗ No valid credentials found. Please login first.")
+                    error_message("No valid credentials found. Please login first.")
                     sys.exit(1)
             
-            print("🚀 Starting file-based log monitoring...")
-            print("📊 Logs will be automatically sent to ForensIQ and stored in MongoDB")
-            print("🤖 AI Agent will provide enhanced analysis and adaptive scheduling")
-            print("Press Ctrl+C to stop monitoring\n")
+            section_header("File-Based Log Monitoring", "🚀")
+            console.print("[dim]📊 Logs will be automatically sent to ForensIQ and stored in MongoDB[/dim]")
+            console.print("[dim]🤖 AI Agent will provide enhanced analysis and adaptive scheduling[/dim]")
+            console.print("[dim]Press Ctrl+C to stop monitoring[/dim]\n")
             
             asyncio.run(cli.start_background_monitoring())
             
         elif args.schedule:
             if not cli.session_token:
-                password = getpass.getpass("Password to decrypt stored credentials: ")
+                password = getpass.getpass("🔑 Password to decrypt stored credentials: ")
                 credentials = cli._load_credentials(password)
                 if not credentials:
-                    print("✗ No valid credentials found. Please login first.")
+                    error_message("No valid credentials found. Please login first.")
                     sys.exit(1)
             
-            print("⏰ Starting scheduled analysis with advanced scheduling...")
-            print("Press Ctrl+C to stop")
+            section_header("Scheduled Analysis", "⏰")
+            console.print("[dim]Press Ctrl+C to stop[/dim]")
             cli.schedule_analysis()
     
     elif args.command == 'analyze':
         # Check authentication
         if not cli.session_token:
-            password = getpass.getpass("Password to decrypt stored credentials: ")
+            password = getpass.getpass("🔑 Password to decrypt stored credentials: ")
             credentials = cli._load_credentials(password)
             if not credentials:
-                print("✗ No valid credentials found. Please login first.")
+                error_message("No valid credentials found. Please login first.")
                 sys.exit(1)
         
         result = asyncio.run(cli.send_log_file(args.file, args.enhanced, args.ai_agent))
         if result:
-            print("✓ Analysis completed!")
+            success_message("Analysis completed!")
             
             # Enhanced output with AI agent insights
             if args.ai_agent and 'ai_agent_analysis' in result:
                 ai_analysis = result['ai_agent_analysis']
                 threat_context = ai_analysis.get('threat_context', {})
                 
-                print(f"\n=== AI Agent Enhanced Analysis ===")
-                print(f"Threat Level: {threat_context.get('severity_level', 'Unknown')}")
-                print(f"Confidence: {threat_context.get('confidence_score', 0):.2f}")
-                print(f"Patterns: {len(ai_analysis.get('detected_patterns', []))}")
-                print(f"Recommendations: {len(ai_analysis.get('recommendations', []))}")
+                ai_panel = Panel.fit(
+                    f"[bold cyan]AI Agent Enhanced Analysis[/bold cyan]\n\n"
+                    f"[yellow]Threat Level:[/yellow] {threat_context.get('severity_level', 'Unknown')}\n"
+                    f"[yellow]Confidence:[/yellow] {threat_context.get('confidence_score', 0):.2f}\n"
+                    f"[yellow]Patterns:[/yellow] {len(ai_analysis.get('detected_patterns', []))}\n"
+                    f"[yellow]Recommendations:[/yellow] {len(ai_analysis.get('recommendations', []))}",
+                    border_style="cyan"
+                )
+                console.print(ai_panel)
                 
                 # Show recommendations
                 recommendations = ai_analysis.get('recommendations', [])
                 if recommendations:
-                    print(f"\nTop Recommendations:")
+                    rec_table = Table(title="🎯 Top Recommendations", box=box.ROUNDED)
+                    rec_table.add_column("#", style="cyan", width=3)
+                    rec_table.add_column("Action", style="yellow")
+                    rec_table.add_column("Priority", style="red")
+                    rec_table.add_column("Description", style="white")
+                    
                     for i, rec in enumerate(recommendations[:5], 1):
-                        print(f"{i}. {rec.get('action')} (Priority: {rec.get('priority')})")
-                        print(f"   {rec.get('description', '')}")
+                        rec_table.add_row(
+                            str(i),
+                            rec.get('action', 'N/A'),
+                            rec.get('priority', 'N/A'),
+                            rec.get('description', 'N/A')[:50] + "..." if len(rec.get('description', '')) > 50 else rec.get('description', 'N/A')
+                        )
+                    console.print(rec_table)
             
             if args.output:
                 with open(args.output, 'w') as f:
                     json.dump(result, f, indent=2, default=str)
-                print(f"Results saved to: {args.output}")
+                success_message(f"Results saved to: {args.output}")
             else:
-                print(json.dumps(result, indent=2, default=str))
+                # Display formatted JSON
+                syntax = Syntax(json.dumps(result, indent=2, default=str), "json", theme="monokai", line_numbers=True)
+                console.print(syntax)
         else:
-            print("✗ Analysis failed!")
+            error_message("Analysis failed!")
     
     elif args.command == 'agent':
         if args.agent_command == 'status':
             if cli.ai_agent:
                 status = cli.ai_agent.get_agent_status()
-                print("=== AI Agent Status ===")
-                print(f"Status: {status['status']}")
-                print(f"Learned Patterns: {status['learned_patterns']}")
-                print(f"Total Analyses: {status['total_analyses']}")
-                print(f"Recent Analyses (24h): {status['recent_analyses_24h']}")
-                print(f"Threat History: {status['threat_history_count']}")
-                if status['last_analysis']:
-                    print(f"Last Analysis: {status['last_analysis']}")
-                print("=====================")
+                
+                agent_table = create_status_table({
+                    'status': status['status'],
+                    'learned_patterns': status['learned_patterns'],
+                    'total_analyses': status['total_analyses'],
+                    'recent_analyses_24h': status['recent_analyses_24h'],
+                    'threat_history': status['threat_history_count'],
+                    'last_analysis': status['last_analysis'] or 'Never'
+                }, "🤖 AI Agent Status")
+                console.print(agent_table)
             else:
-                print("AI Agent is not initialized")
+                warning_message("AI Agent is not initialized")
         
         elif args.agent_command == 'configure':
             if args.enable:
                 cli.config['ai_agent_enabled'] = True
                 cli.ai_agent = AIAgent(cli)
-                print("✓ AI Agent enabled")
+                success_message("AI Agent enabled")
             elif args.disable:
                 cli.config['ai_agent_enabled'] = False
                 cli.ai_agent = None
-                print("✓ AI Agent disabled")
+                success_message("AI Agent disabled")
             
             if cli.ai_agent:
+                updates = {}
                 if args.learning_threshold:
                     cli.ai_agent.config['learning_threshold'] = args.learning_threshold
+                    updates['learning_threshold'] = args.learning_threshold
                 if args.high_threat_interval:
                     cli.ai_agent.config['high_threat_interval'] = args.high_threat_interval
-                cli.ai_agent._save_agent_state()
-                print("✓ AI Agent configuration updated")
+                    updates['high_threat_interval'] = args.high_threat_interval
+                
+                if updates:
+                    cli.ai_agent._save_agent_state()
+                    config_table = create_status_table(updates, "🔧 AI Agent Configuration")
+                    console.print(config_table)
+                    success_message("AI Agent configuration updated")
             
             cli._save_config()
         
@@ -1976,13 +2204,13 @@ def main():
                 cli.ai_agent.analysis_history.clear()
                 cli.ai_agent.threat_history.clear()
                 cli.ai_agent._save_agent_state()
-                print("✓ AI Agent learning data reset")
+                success_message("AI Agent learning data reset")
             else:
-                print("Use --confirm flag to reset AI agent data")
+                warning_message("Use --confirm flag to reset AI agent data")
     
     elif args.command == 'data':
         if not args.data_command:
-            print("Please specify a data command. Use 'python cli_tool.py data --help' for options.")
+            error_message("Please specify a data command. Use 'python cli_tool.py data --help' for options.")
             return
         
         if args.data_command == 'analysis':
@@ -1991,9 +2219,9 @@ def main():
             if args.export:
                 success = asyncio.run(cli.export_collection_data('analysis', args.export, args.limit, args.format))
                 if success:
-                    print(f"✓ Analysis data exported to {args.export}")
+                    success_message(f"Analysis data exported to {args.export}")
                 else:
-                    print("✗ Failed to export analysis data")
+                    error_message("Failed to export analysis data")
             else:
                 cli.display_analysis_data(analysis_data)
         
@@ -2003,9 +2231,9 @@ def main():
             if args.export:
                 success = asyncio.run(cli.export_collection_data('monitoring', args.export, args.limit, args.format))
                 if success:
-                    print(f"✓ Monitoring sessions exported to {args.export}")
+                    success_message(f"Monitoring sessions exported to {args.export}")
                 else:
-                    print("✗ Failed to export monitoring sessions")
+                    error_message("Failed to export monitoring sessions")
             else:
                 cli.display_monitoring_sessions(sessions_data)
         
@@ -2014,20 +2242,32 @@ def main():
             cli.display_collection_stats(stats)
         
         elif args.data_command == 'list':
-            print("\n📋 Available MongoDB Collections:")
-            print("=" * 40)
-            print("1. 🔍 analysis - Log analysis results")
-            print("   - Contains MITRE ATT&CK technique matches")
-            print("   - AI-enhanced threat analysis")
-            print("   - User analysis history")
-            print("\n2. 📊 sessions - Monitoring sessions")
-            print("   - Active monitoring configurations")
-            print("   - Session status and statistics")
-            print("   - Log source configurations")
-            print("\n3. 👥 users - User accounts")
-            print("   - User authentication data")
-            print("   - Profile information")
-            print("\nUse 'python cli_tool.py data <collection> --help' for retrieval options.")
+            section_header("Available MongoDB Collections", "📋")
+            
+            collections_table = Table(box=box.ROUNDED, border_style="bright_green")
+            collections_table.add_column("Collection", style="cyan", no_wrap=True)
+            collections_table.add_column("Description", style="white")
+            collections_table.add_column("Data Type", style="yellow")
+            
+            collections_table.add_row(
+                "🔍 analysis",
+                "Log analysis results with MITRE ATT&CK techniques",
+                "Analysis Data"
+            )
+            collections_table.add_row(
+                "📊 sessions", 
+                "Active monitoring configurations and statistics",
+                "Session Data"
+            )
+            collections_table.add_row(
+                "👥 users",
+                "User authentication and profile information", 
+                "User Data"
+            )
+            
+            console.print(collections_table)
+            console.print("\n[dim]Use 'python cli_tool.py data <collection> --help' for retrieval options.[/dim]")
 
 if __name__ == "__main__":
     main()
+ 

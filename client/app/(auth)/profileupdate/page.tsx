@@ -39,8 +39,9 @@ const ProfessionalTerminalProfileUpdate: React.FC = () => {
   const [showCursor, setShowCursor] = useState(true);
   const [showPrompt, setShowPrompt] = useState(false);
   const [errors, setErrors] = useState<string[]>([]);
+  const [client, setClient] = useState(false);
   const [authToken, setAuthToken] = useState<string | null>(null); // Demo token for display
-  const [apiBaseUrl] = useState('http://localhost:8000');
+  const [apiBaseUrl] = useState(process.env.NEXT_PUBLIC_API_BASE_URL);
   const terminalRef = useRef<HTMLDivElement>(null);
   const inputRef = useRef<HTMLInputElement>(null);
 
@@ -67,6 +68,9 @@ const ProfessionalTerminalProfileUpdate: React.FC = () => {
     });
   };
 
+  useEffect(()=>{
+    setClient(true);
+  },[])
   const addTerminalLine = (text: string, type: TerminalLine['type'] = 'system') => {
     const newLine: TerminalLine = {
       id: Date.now() + Math.random(),
@@ -669,6 +673,7 @@ if (changedFields.has('email')){
   };
 
   return (
+    client &&
     <div className="h-screen w-screen bg-black text-green-400 font-mono overflow-hidden flex flex-col">
       {/* Terminal Header */}
       <div className="flex items-center justify-between border-b border-gray-700 px-4 py-2 bg-gray-900 flex-shrink-0">
