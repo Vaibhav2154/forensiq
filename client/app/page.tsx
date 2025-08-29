@@ -10,7 +10,7 @@ const Hyperspeed = () => {
 const LandingPage = () => {
   const router = useRouter();
   const [isVisible, setIsVisible] = useState(false);
-  const [hoveredButton, setHoveredButton] = useState<'login' | 'signup' | null>(null);
+  const [hoveredButton, setHoveredButton] = useState<'login' | 'signup' | 'dashboard' | null>(null);
   const [terminalText, setTerminalText] = useState('');
   const [showCursor, setShowCursor] = useState(true);
 
@@ -102,6 +102,28 @@ const LandingPage = () => {
           {/* Terminal-style Buttons Container */}
           <div className={`flex flex-col sm:flex-row items-center gap-6 transform transition-all duration-1000 delay-500 ${isVisible ? 'translate-y-0 opacity-100' : 'translate-y-10 opacity-0'}`}>
             
+            {/* Dashboard Button */}
+            <div className="relative group">
+              <button 
+                className='group relative bg-black border-2 border-blue-500 hover:border-cyan-400 text-blue-400 hover:text-cyan-400 font-bold font-mono text-lg px-8 py-4 rounded-none transition-all duration-300 hover:shadow-[0_0_20px_rgba(59,130,246,0.5)] hover:shadow-cyan-400/50 min-w-[180px] glitch-btn'
+                onMouseEnter={() => setHoveredButton('dashboard')}
+                onMouseLeave={() => setHoveredButton(null)}
+                onClick={() => router.push('/dashboard')}
+              >
+                <span className="relative z-10 flex items-center justify-center gap-3">
+                  <span className="text-cyan-400">&gt;</span>
+                  ENTER_SYSTEM
+                  <span className="text-blue-400">_</span>
+                </span>
+                {hoveredButton === 'dashboard' && (
+                  <>
+                    <div className="absolute inset-0 bg-blue-500/10 animate-pulse" />
+                    <div className="absolute -inset-1 border border-cyan-400/50 animate-pulse" />
+                  </>
+                )}
+              </button>
+            </div>
+
             {/* Login Button */}
             <div className="relative group">
               <button 
