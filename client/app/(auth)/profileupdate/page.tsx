@@ -1,5 +1,6 @@
 'use client'
 import React, { useState, useEffect, useRef } from 'react';
+import {useRouter} from 'next/navigation'
 
 interface TerminalLine {
   id: number;
@@ -16,9 +17,11 @@ interface UserProfile {
   confirmPassword: string;
 }
 
+
 type ProfileField = keyof UserProfile;
 
 const ProfessionalTerminalProfileUpdate: React.FC = () => {
+    const router = useRouter();
   const [terminalLines, setTerminalLines] = useState<TerminalLine[]>([]);
   const [currentInput, setCurrentInput] = useState('');
   const [isUpdateComplete, setIsUpdateComplete] = useState(false);
@@ -37,7 +40,7 @@ const ProfessionalTerminalProfileUpdate: React.FC = () => {
   const [showPrompt, setShowPrompt] = useState(false);
   const [errors, setErrors] = useState<string[]>([]);
   const [authToken, setAuthToken] = useState<string | null>(null); // Demo token for display
-  const [apiBaseUrl] = useState('http://127.0.0.1:8000');
+  const [apiBaseUrl] = useState('https://39619b5d65b6.ngrok-free.app');
   const terminalRef = useRef<HTMLDivElement>(null);
   const inputRef = useRef<HTMLInputElement>(null);
 
@@ -137,9 +140,10 @@ const ProfessionalTerminalProfileUpdate: React.FC = () => {
     addTerminalLine('4. Review Current Profile', 'system');
     addTerminalLine('5. Save All Changes', 'system');
     addTerminalLine('6. Delete Account', 'system');
-    addTerminalLine('7. Cancel and Exit', 'system');
+    addTerminalLine('7. Logout', 'system');
+    addTerminalLine('8. Cancel and Exit', 'system');
     addTerminalLine('', 'system');
-    addTerminalLine('Enter your choice (1-7):', 'prompt');
+    addTerminalLine('Enter your choice (1-8):', 'prompt');
     setCurrentStep('menu');
     setShowPrompt(true);
   };
@@ -204,13 +208,20 @@ const ProfessionalTerminalProfileUpdate: React.FC = () => {
         addTerminalLine('', 'system');
         confirmDeleteAccount();
         break;
-      case '7':
+    case '7':
+        addTerminalLine('Selected: Logout', 'info');
+        addTerminalLine('','system')
+        logout();
+        router.push('/');
+        break;
+      case '8':
         addTerminalLine('Selected: Cancel and Exit', 'warning');
         addTerminalLine('Exiting profile update...', 'info');
         setTimeout(() => {
           addTerminalLine('Session terminated.', 'info');
           addTerminalLine('Thank you for using SecureSystem Profile Manager.', 'success');
         }, 1000);
+        router.push('/dashboard');
         break;
       default:
         addTerminalLine(`Invalid choice: ${choice}`, 'error');
@@ -380,7 +391,7 @@ const ProfessionalTerminalProfileUpdate: React.FC = () => {
     setCurrentInput('');
   };
 
-  const updateUserProfile = async (updateData: { email?: string; username?: string; full_name?: string }) => {
+  const updateUserProfile = async (updateData: { email?: string; username?: string}) => {
     console.log(updateData)
     try {
       addTerminalLine(`PUT ${apiBaseUrl}/users/me`, 'system');
@@ -409,6 +420,12 @@ const ProfessionalTerminalProfileUpdate: React.FC = () => {
     }
   };
 
+  const logout = async () =>{
+    localStorage.removeItem('token');
+    localStorage.removeItem('user');
+    localStorage.removeItem('user.email');
+    localStorage.removeItem('user.username');
+  }
   const changeUserPassword = async (currentPassword: string, newPassword: string) => {
     try {
       addTerminalLine(`PUT ${apiBaseUrl}/users/me/password`, 'system');
@@ -500,10 +517,19 @@ const ProfessionalTerminalProfileUpdate: React.FC = () => {
       if (profileChanges.size > 0) {
         addTerminalLine('Updating profile information...', 'info');
         
-        const updateData: { email?: string; username?: string; full_name?: string } = {};
-        if (changedFields.has('username')) updateData.full_name = profile.username;
-        if (changedFields.has('username')) updateData.username = localStorage.getItem('user.username') || '';
-        if (changedFields.has('email')) updateData.email = profile.email;
+        const updateData: { email?: string; username?: string} = {};
+       // if (changedFields.has('username')) updateData.full_name = profile.username;
+       if (changedFields.has('username')){
+        updateData.username = profile.username ;
+        updateData.email = localStorage.getItem('user.email') || profile.email;
+       } 
+if (changedFields.has('email')){
+   updateData.email = localStorage.getItem('user.email') || profile.email;
+   updateData.username = localStorage.getItem('user.username') || profile.username;
+} 
+
+
+        console.log(updateData);
 
         const profileResponse = await updateUserProfile(updateData);
 
