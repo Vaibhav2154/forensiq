@@ -1,6 +1,8 @@
 from fastapi import APIRouter, HTTPException
 from typing import Dict, Any
 import time
+
+from pydantic import BaseModel
 from model.logs_model import LogAnalysisRequest, LogAnalysisResponse, AttackTechnique
 from services import GeminiService, ChromaDBService
 from core import logger

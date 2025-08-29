@@ -1,9 +1,9 @@
 from fastapi import APIRouter, Depends, HTTPException, status
-from fastapi.security import OAuth2PasswordBearer, OAuth2PasswordRequestForm
+from fastapi.security import OAuth2PasswordBearer
 from jose import JWTError, jwt
 from core import  security
 from core.config import settings
-from model.users import UserBase,UserCreate,UserInDB,Token,TokenData
+from model.users import UserBase,UserCreate,UserInDB,Token,TokenData,LoginRequest
 from db import database
 
 router = APIRouter(tags=["Authentication"])
@@ -46,10 +46,10 @@ async def register_user(user: UserCreate):
     return user_in_db
 
 @router.post("/login", response_model=Token)
-async def login(form_data: OAuth2PasswordRequestForm = Depends()):
-    user = await database.user_collection.find_one({"email": form_data.username})
+async def login(login_data: LoginRequest):
+    user = await database.user_collection.find_one({"email": login_data.username})
     
-    if not user or not security.verify_password(form_data.password, user["hashed_password"]):
+    if not user or not security.verify_password(login_data.password, user["hashed_password"]):
         raise HTTPException(
             status_code=status.HTTP_401_UNAUTHORIZED,
             detail="Incorrect username or password",

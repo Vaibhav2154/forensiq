@@ -1,103 +1,237 @@
-import Image from "next/image";
+'use client'
 
-export default function Home() {
+import React, { useState, useEffect } from 'react';
+import { useRouter } from 'next/navigation';
+
+const Hyperspeed = () => {
+  return <div className="absolute inset-0 bg-black" />;
+};
+
+const LandingPage = () => {
+  const router = useRouter();
+  const [isVisible, setIsVisible] = useState(false);
+  const [hoveredButton, setHoveredButton] = useState<'login' | 'signup' | null>(null);
+  const [terminalText, setTerminalText] = useState('');
+  const [showCursor, setShowCursor] = useState(true);
+
+  const fullTerminalText = '> Initializing FORENSIQ Systems...';
+
+  useEffect(() => {
+    setIsVisible(true);
+    
+    // Terminal typing effect
+    let i = 0;
+    const typeInterval = setInterval(() => {
+      if (i <= fullTerminalText.length) {
+        setTerminalText(fullTerminalText.slice(0, i));
+        i++;
+      } else {
+        clearInterval(typeInterval);
+      }
+    }, 100);
+
+    // Cursor blinking
+    const cursorInterval = setInterval(() => {
+      setShowCursor(prev => !prev);
+    }, 500);
+
+    return () => {
+      clearInterval(typeInterval);
+      clearInterval(cursorInterval);
+    };
+  }, []);
+
   return (
-    <div className="font-sans grid grid-rows-[20px_1fr_20px] items-center justify-items-center min-h-screen p-8 pb-20 gap-16 sm:p-20">
-      <main className="flex flex-col gap-[32px] row-start-2 items-center sm:items-start">
-        <Image
-          className="dark:invert"
-          src="/next.svg"
-          alt="Next.js logo"
-          width={180}
-          height={38}
-          priority
+    <div>
+      <div className='relative h-screen w-screen overflow-hidden'>
+        <Hyperspeed />
+        
+        {/* Terminal grid overlay */}
+        <div 
+          className="absolute inset-0 opacity-10"
+          style={{
+            backgroundImage: `
+              linear-gradient(rgba(0, 255, 150, 0.1) 1px, transparent 1px),
+              linear-gradient(90deg, rgba(0, 255, 150, 0.1) 1px, transparent 1px)
+            `,
+            backgroundSize: '20px 20px'
+          }}
         />
-        <ol className="font-mono list-inside list-decimal text-sm/6 text-center sm:text-left">
-          <li className="mb-2 tracking-[-.01em]">
-            Get started by editing{" "}
-            <code className="bg-black/[.05] dark:bg-white/[.06] font-mono font-semibold px-1 py-0.5 rounded">
-              app/page.tsx
-            </code>
-            .
-          </li>
-          <li className="tracking-[-.01em]">
-            Save and see your changes instantly.
-          </li>
-        </ol>
+        
+        {/* Matrix-style overlay */}
+        <div className="absolute inset-0 bg-gradient-to-b from-black/60 via-transparent to-black/80" />
+        
+        <div className='absolute inset-0 flex flex-col items-center justify-center gap-8 font-mono'>
+          
+          {/* Terminal Header */}
+          <div className={`w-full max-w-4xl mx-auto px-4 transform transition-all duration-1000 ${isVisible ? 'translate-y-0 opacity-100' : '-translate-y-10 opacity-0'}`}>
+            <div className="bg-black/80 backdrop-blur-sm border border-green-500/30 rounded-t-lg p-3">
+              <div className="flex items-center gap-2 mb-2">
+                <div className="w-3 h-3 rounded-full bg-red-500"></div>
+                <div className="w-3 h-3 rounded-full bg-yellow-500"></div>
+                <div className="w-3 h-3 rounded-full bg-green-500"></div>
+                <span className="ml-4 text-green-400 text-sm">root@forensiq:~#</span>
+              </div>
+              <div className="text-green-400 text-sm">
+                {terminalText}
+                {showCursor && <span className="bg-green-400 text-black ml-1">▊</span>}
+              </div>
+            </div>
+          </div>
 
-        <div className="flex gap-4 items-center flex-col sm:flex-row">
-          <a
-            className="rounded-full border border-solid border-transparent transition-colors flex items-center justify-center bg-foreground text-background gap-2 hover:bg-[#383838] dark:hover:bg-[#ccc] font-medium text-sm sm:text-base h-10 sm:h-12 px-4 sm:px-5 sm:w-auto"
-            href="https://vercel.com/new?utm_source=create-next-app&utm_medium=appdir-template-tw&utm_campaign=create-next-app"
-            target="_blank"
-            rel="noopener noreferrer"
-          >
-            <Image
-              className="dark:invert"
-              src="/vercel.svg"
-              alt="Vercel logomark"
-              width={20}
-              height={20}
-            />
-            Deploy now
-          </a>
-          <a
-            className="rounded-full border border-solid border-black/[.08] dark:border-white/[.145] transition-colors flex items-center justify-center hover:bg-[#f2f2f2] dark:hover:bg-[#1a1a1a] hover:border-transparent font-medium text-sm sm:text-base h-10 sm:h-12 px-4 sm:px-5 w-full sm:w-auto md:w-[158px]"
-            href="https://nextjs.org/docs?utm_source=create-next-app&utm_medium=appdir-template-tw&utm_campaign=create-next-app"
-            target="_blank"
-            rel="noopener noreferrer"
-          >
-            Read our docs
-          </a>
+          {/* TrackBack Title */}
+          <div className={`text-center transform transition-all duration-1000 delay-300 ${isVisible ? 'translate-y-0 opacity-100' : '-translate-y-10 opacity-0'}`}>
+            <div className="relative">
+              <h2 className='text-4xl md:text-8xl font-black mb-4 text-green-400 tracking-wider filter  glitch-text'>
+                ForensIQ
+              </h2>
+              {/* Glitch lines */}
+              
+            </div>
+            
+            <div className="bg-black/60 backdrop-blur-sm border border-green-500/30 rounded-lg p-4 max-w-2xl mx-auto">
+              <p className="text-green-300 text-lg font-mono">
+                <span className="text-cyan-400">[STATUS]</span> NEURAL NETWORK INTERFACE ACTIVE
+              </p>
+              <p className="text-slate-300 font-mono text-sm mt-1">
+                &gt; Advanced tracking protocols initialized
+              </p>
+            </div>
+          </div>
+
+          {/* Terminal-style Buttons Container */}
+          <div className={`flex flex-col sm:flex-row items-center gap-6 transform transition-all duration-1000 delay-500 ${isVisible ? 'translate-y-0 opacity-100' : 'translate-y-10 opacity-0'}`}>
+            
+            {/* Login Button */}
+            <div className="relative group">
+              <button 
+                className='group relative bg-black border-2 border-green-500 hover:border-cyan-400 text-green-400 hover:text-cyan-400 font-bold font-mono text-lg px-8 py-4 rounded-none transition-all duration-300 hover:shadow-[0_0_20px_rgba(34,197,94,0.5)] hover:shadow-cyan-400/50 min-w-[180px] glitch-btn'
+                onMouseEnter={() => setHoveredButton('login')}
+                onClick={() => router.push('/login')}
+              >
+                <span className="relative z-10 flex items-center justify-center gap-3">
+                  <span className="text-cyan-400">&gt;</span>
+                  ACCESS_LOGIN
+                  <span className="text-green-400">_</span>
+                </span>
+                {hoveredButton === 'login' && (
+                  <>
+                    <div className="absolute inset-0 bg-green-500/10 animate-pulse" />
+                    <div className="absolute -inset-1 border border-cyan-400/50 animate-pulse" />
+                  </>
+                )}
+              </button>
+            </div>
+
+            {/* Sign Up Button */}
+            <div className="relative group">
+              <button 
+                className='group relative bg-black border-2 border-green-500 hover:border-purple-400 text-green-400 hover:text-purple-400 font-bold font-mono text-lg px-8 py-4 rounded-none transition-all duration-300 hover:shadow-[0_0_20px_rgba(34,197,94,0.5)] hover:shadow-purple-400/50 min-w-[180px] glitch-btn'
+                onMouseEnter={() => setHoveredButton('signup')}
+                onMouseLeave={() => setHoveredButton(null)}
+                onClick={() => router.push('/signup')}
+              >
+                <span className="relative z-10 flex items-center justify-center gap-3">
+                  <span className="text-purple-400">&gt;</span>
+                  REGISTER_USER
+                  <span className="text-green-400">_</span>
+                </span>
+                {hoveredButton === 'signup' && (
+                  <>
+                    <div className="absolute inset-0 bg-purple-500/10 animate-pulse" />
+                    <div className="absolute -inset-1 border border-purple-400/50 animate-pulse" />
+                  </>
+                )}
+              </button>
+            </div>
+          </div>
+
+          {/* Terminal Status Pills */}
+          <div className={`flex flex-wrap justify-center gap-4 mt-6 max-w-4xl mx-auto transform transition-all duration-1000 delay-700 ${isVisible ? 'translate-y-0 opacity-100' : 'translate-y-10 opacity-0'}`}>
+            <div className="px-4 py-2 bg-black/80 border border-green-500/50 font-mono text-green-400 text-sm hover:border-cyan-400 hover:text-cyan-400 transition-all duration-300 cursor-default">
+              [SPEED: 99.9%]
+            </div>
+            <div className="px-4 py-2 bg-black/80 border border-green-500/50 font-mono text-green-400 text-sm hover:border-yellow-400 hover:text-yellow-400 transition-all duration-300 cursor-default">
+              [SECURITY: MAX]
+            </div>
+            <div className="px-4 py-2 bg-black/80 border border-green-500/50 font-mono text-green-400 text-sm hover:border-purple-400 hover:text-purple-400 transition-all duration-300 cursor-default">
+              [ANALYTICS: ON]
+            </div>
+            <div className="px-4 py-2 bg-black/80 border border-green-500/50 font-mono text-green-400 text-sm hover:border-red-400 hover:text-red-400 transition-all duration-300 cursor-default">
+              [REALTIME: LIVE]
+            </div>
+          </div>
+
+          {/* Terminal Footer */}
+          <div className={`absolute bottom-6 left-1/2 transform -translate-x-1/2 transition-all duration-1000 delay-900 ${isVisible ? 'translate-y-0 opacity-100' : 'translate-y-10 opacity-0'}`}>
+            <div className="bg-black/80 backdrop-blur-sm border border-green-500/30 rounded px-6 py-3">
+              <div className="flex items-center gap-4 text-green-400 font-mono text-sm">
+                <span className="animate-pulse">●</span>
+                <span>SYSTEM_STATUS: ONLINE</span>
+                <span className="text-slate-500">|</span>
+                <span>CONN: SECURE</span>
+                <span className="text-slate-500">|</span>
+                <span className="text-cyan-400">SCROLL_DOWN &gt;</span>
+              </div>
+            </div>
+          </div>
+
+          {/* Floating ASCII elements */}
+          <div className="absolute top-20 left-10 text-green-500/20 font-mono text-xs animate-pulse">
+            {`{
+  "status": "active",
+  "mode": "hacker"
+}`}
+          </div>
+          
+          <div className="absolute top-32 right-12 text-green-500/20 font-mono text-xs animate-pulse delay-1000">
+            &gt; ./trackback.exe
+          </div>
+          
+          <div className="absolute bottom-32 left-16 text-green-500/20 font-mono text-xs animate-pulse delay-2000">
+            [ROOT@SYSTEM]#
+          </div>
         </div>
-      </main>
-      <footer className="row-start-3 flex gap-[24px] flex-wrap items-center justify-center">
-        <a
-          className="flex items-center gap-2 hover:underline hover:underline-offset-4"
-          href="https://nextjs.org/learn?utm_source=create-next-app&utm_medium=appdir-template-tw&utm_campaign=create-next-app"
-          target="_blank"
-          rel="noopener noreferrer"
-        >
-          <Image
-            aria-hidden
-            src="/file.svg"
-            alt="File icon"
-            width={16}
-            height={16}
-          />
-          Learn
-        </a>
-        <a
-          className="flex items-center gap-2 hover:underline hover:underline-offset-4"
-          href="https://vercel.com/templates?framework=next.js&utm_source=create-next-app&utm_medium=appdir-template-tw&utm_campaign=create-next-app"
-          target="_blank"
-          rel="noopener noreferrer"
-        >
-          <Image
-            aria-hidden
-            src="/window.svg"
-            alt="Window icon"
-            width={16}
-            height={16}
-          />
-          Examples
-        </a>
-        <a
-          className="flex items-center gap-2 hover:underline hover:underline-offset-4"
-          href="https://nextjs.org?utm_source=create-next-app&utm_medium=appdir-template-tw&utm_campaign=create-next-app"
-          target="_blank"
-          rel="noopener noreferrer"
-        >
-          <Image
-            aria-hidden
-            src="/globe.svg"
-            alt="Globe icon"
-            width={16}
-            height={16}
-          />
-          Go to nextjs.org →
-        </a>
-      </footer>
+      </div>
+
+      <style jsx>{`
+        .glitch-text {
+          position: relative;
+        }
+        .glitch-1 {
+          animation: glitch1 2s infinite;
+        }
+        .glitch-2 {
+          animation: glitch2 2s infinite;
+        }
+        .glitch-btn:hover .glitch-text {
+          animation: glitch3 0.3s;
+        }
+
+        @keyframes glitch1 {
+          0%, 100% { transform: translateX(0); }
+          20% { transform: translateX(-2px) translateY(1px); }
+          40% { transform: translateX(-1px) translateY(-1px); }
+          60% { transform: translateX(1px) translateY(1px); }
+          80% { transform: translateX(1px) translateY(-1px); }
+        }
+
+        @keyframes glitch2 {
+          0%, 100% { transform: translateX(0); }
+          10% { transform: translateX(2px) translateY(-1px); }
+          30% { transform: translateX(-1px) translateY(2px); }
+          50% { transform: translateX(1px) translateY(-2px); }
+          70% { transform: translateX(-2px) translateY(1px); }
+        }
+
+        @keyframes glitch3 {
+          0%, 100% { transform: translateX(0); }
+          25% { transform: translateX(-2px); }
+          75% { transform: translateX(2px); }
+        }
+      `}</style>
     </div>
   );
-}
+};
+
+export default LandingPage;
