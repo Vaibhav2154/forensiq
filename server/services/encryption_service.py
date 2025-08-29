@@ -168,27 +168,49 @@ class EncryptionService:
                                  encrypted_data: Dict[str, str],
                                  user_id: str) -> Dict[str, Any]:
         """Decrypt all analysis results."""
-        key, _ = self._generate_user_key(user_id)
-        cipher = Fernet(key)
-        
-        decrypted_data = {}
-        
-        # Decrypt summary
-        if encrypted_data.get('summary'):
-            decrypted_data['summary'] = cipher.decrypt(encrypted_data['summary'].encode('ascii')).decode('utf-8')
-        
-        # Decrypt techniques
-        if encrypted_data.get('techniques'):
-            decrypted_techniques_json = cipher.decrypt(encrypted_data['techniques'].encode('ascii')).decode('utf-8')
-            decrypted_data['techniques'] = json.loads(decrypted_techniques_json)
-        
-        # Decrypt enhanced analysis if present
-        if encrypted_data.get('enhanced_analysis'):
-            decrypted_data['enhanced_analysis'] = cipher.decrypt(encrypted_data['enhanced_analysis'].encode('ascii')).decode('utf-8')
-        else:
-            decrypted_data['enhanced_analysis'] = None
+        try:
+            key, _ = self._generate_user_key(user_id)
+            cipher = Fernet(key)
             
-        return decrypted_data
+            decrypted_data = {}
+            
+            # Decrypt summary
+            if encrypted_data.get('summary'):
+                try:
+                    decrypted_data['summary'] = cipher.decrypt(encrypted_data['summary'].encode('ascii')).decode('utf-8')
+                except Exception:
+                    decrypted_data['summary'] = ""
+            else:
+                decrypted_data['summary'] = ""
+            
+            # Decrypt techniques
+            if encrypted_data.get('techniques'):
+                try:
+                    decrypted_techniques_json = cipher.decrypt(encrypted_data['techniques'].encode('ascii')).decode('utf-8')
+                    decrypted_data['techniques'] = json.loads(decrypted_techniques_json)
+                except Exception:
+                    decrypted_data['techniques'] = []
+            else:
+                decrypted_data['techniques'] = []
+            
+            # Decrypt enhanced analysis if present
+            if encrypted_data.get('enhanced_analysis'):
+                try:
+                    decrypted_data['enhanced_analysis'] = cipher.decrypt(encrypted_data['enhanced_analysis'].encode('ascii')).decode('utf-8')
+                except Exception:
+                    decrypted_data['enhanced_analysis'] = None
+            else:
+                decrypted_data['enhanced_analysis'] = None
+                
+            return decrypted_data
+        
+        except Exception as e:
+            logger.error(f"Failed to decrypt analysis results for user {user_id}: {str(e)}")
+            return {
+                'summary': "",
+                'techniques': [],
+                'enhanced_analysis': None
+            }
 
 # Global service instance
 encryption_service = EncryptionService()

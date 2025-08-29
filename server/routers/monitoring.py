@@ -149,17 +149,47 @@ async def store_analysis_result(
 ):
     """Store analysis result in MongoDB."""
     try:
-        username = current_user.get('username')
+        user_id = current_user.get('username')
         
-        analysis_id = await storage_service.store_analysis(
-            username=username,
-            log_content=request.log_content,
-            analysis_result=request.analysis_result,
-            session_id=request.session_id,
-            log_file_path=request.log_file_path
+        # Extract the actual analysis data from additionalProp1
+        actual_analysis_data = request.analysis_result.get('additionalProp1', {})
+        
+        # Create proper technique objects
+        class MockTechnique:
+            def __init__(self, technique_data):
+                self.data = technique_data
+                
+            def model_dump(self):
+                return self.data
+        
+        # Create response object using the actual data from additionalProp1
+        class MockResponse:
+            def __init__(self, analysis_data):
+                self.summary = analysis_data.get('summary', 'No summary provided')
+                self.enhanced_analysis = analysis_data.get('enhanced_analysis', None)
+                
+                # Convert techniques to proper objects
+                self.matched_techniques = []
+                techniques = analysis_data.get('matched_techniques', [])
+                
+                for tech in techniques:
+                    mock_tech = MockTechnique(tech)
+                    self.matched_techniques.append(mock_tech)
+                
+                self.processing_time_ms = analysis_data.get('processing_time_ms', 0)
+        
+        class MockRequest:
+            def __init__(self, log_content):
+                self.logs = log_content
+        
+        mock_request = MockRequest(request.log_content)
+        mock_response = MockResponse(actual_analysis_data)
+        
+        analysis_id = await storage_service.store_analysis_result(
+            user_id=user_id,
+            request=mock_request,
+            response=mock_response
         )
-        
-        logger.info(f"Stored analysis {analysis_id} for user {username}")
         
         return AnalysisResponse(
             analysis_id=analysis_id,
@@ -169,7 +199,7 @@ async def store_analysis_result(
         
     except Exception as e:
         logger.error(f"Failed to store analysis: {e}")
-        raise HTTPException(status_code=500, detail="Failed to store analysis result")
+        raise HTTPException(status_code=500, detail=str(e))
 
 @router.get("/analysis/{analysis_id}", response_model=Dict[str, Any])
 async def get_analysis_result(
@@ -178,14 +208,12 @@ async def get_analysis_result(
 ):
     """Retrieve stored analysis result."""
     try:
-        analysis = await storage_service.get_analysis(analysis_id)
+        user_id = current_user.get('username')
+        
+        analysis = await storage_service.get_analysis_result(user_id, analysis_id)
         
         if not analysis:
             raise HTTPException(status_code=404, detail="Analysis not found")
-        
-        # Check if user owns this analysis
-        if analysis.get('username') != current_user.get('username'):
-            raise HTTPException(status_code=403, detail="Access denied")
         
         return analysis
         
@@ -198,12 +226,13 @@ async def get_analysis_result(
 @router.get("/analysis/user/history", response_model=List[Dict[str, Any]])
 async def get_user_analysis_history(
     limit: int = 50,
+    offset: int = 0,
     current_user: dict = Depends(get_current_user)
 ):
     """Get analysis history for the current user."""
     try:
-        username = current_user.get('username')
-        analyses = await storage_service.get_user_analyses(username, limit)
+        user_id = current_user.get('username')
+        analyses = await storage_service.get_user_analysis_history(user_id, limit, offset)
         
         return analyses
         

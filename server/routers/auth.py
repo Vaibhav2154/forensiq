@@ -8,8 +8,8 @@ from db import database
 
 router = APIRouter(tags=["Authentication"])
 
-# Updated tokenUrl to match the actual login endpoint path
-oauth2_scheme = OAuth2PasswordBearer(tokenUrl="/login")
+# Updated tokenUrl to match the OAuth2 token endpoint for Swagger UI
+oauth2_scheme = OAuth2PasswordBearer(tokenUrl="/token")
 
 async def get_current_user(token: str = Depends(oauth2_scheme)):
     credentials_exception = HTTPException(
@@ -46,14 +46,15 @@ async def register_user(user: UserCreate):
     await database.user_collection.insert_one(user_in_db.model_dump())
     return user_in_db
 
+
+
 @router.post("/login", response_model=Token)
 async def login(login_data: LoginRequest):
     """
-    Login endpoint that supports JSON.
+    JSON login endpoint for frontend applications.
     
-    - Use JSON body with LoginRequest for frontend integration
+    Use JSON body with LoginRequest for frontend integration.
     """
-    
     username_or_email = login_data.username
     password = login_data.password
     
@@ -74,20 +75,29 @@ async def login(login_data: LoginRequest):
     access_token = security.create_access_token(data={"sub": user["username"]})
     return {"access_token": access_token, "token_type": "bearer"}
 
-# COMMENTED OUT - Old login endpoint (keeping for reference)
-# @router.post("/login", response_model=Token)
-# async def login(login_data: LoginRequest,form_data : OAuth2PasswordRequestForm = Depends()):
-#     #user = await database.user_collection.find_one({"email": login_data.username})
-#     user = await database.user_collection.find_one({"email": form_data.username})
-#     
-#     if not user or not security.verify_password(form_data.password, user["hashed_password"]):
-#         raise HTTPException(
-#             status_code=status.HTTP_401_UNAUTHORIZED,
-#             detail="Incorrect username or password",
-#             headers={"WWW-Authenticate": "Bearer"},
-#         )
-#     access_token = security.create_access_token(data={"sub": user["username"]})
-#     return {"access_token": access_token, "token_type": "bearer"}
+@router.post("/token", response_model=Token)
+async def login_for_access_token(form_data: OAuth2PasswordRequestForm = Depends()):
+    """
+    OAuth2 compatible token endpoint for Swagger UI authentication.
+    
+    This endpoint is used by Swagger UI's "Authorize" button.
+    """
+    # Try to find user by email first
+    user = await database.user_collection.find_one({"email": form_data.username})
+    
+    # If not found by email, try by username
+    if not user:
+        user = await database.user_collection.find_one({"username": form_data.username})
+    
+    if not user or not security.verify_password(form_data.password, user["hashed_password"]):
+        raise HTTPException(
+            status_code=status.HTTP_401_UNAUTHORIZED,
+            detail="Incorrect username or password",
+            headers={"WWW-Authenticate": "Bearer"},
+        )
+    
+    access_token = security.create_access_token(data={"sub": user["username"]})
+    return {"access_token": access_token, "token_type": "bearer"}
 
 @router.get("/users/me", response_model=UserBase)
 async def read_users_me(current_user: UserBase = Depends(get_current_user)):
