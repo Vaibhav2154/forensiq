@@ -259,7 +259,7 @@ class ForensIQCLI:
             credentials = {
                 'username': username,
                 'token': token,
-                'timestamp': datetime.utcnow().isoformat()
+                'timestamp': datetime.now(timezone.utc).isoformat()
             }
             encrypted_creds = self._encrypt_data(json.dumps(credentials), self.encryption_key)
             
@@ -286,7 +286,12 @@ class ForensIQCLI:
             
             # Check if token is still valid (24 hours)
             token_time = datetime.fromisoformat(credentials['timestamp'])
-            if datetime.utcnow() - token_time > timedelta(hours=24):
+            # Make sure both datetimes are timezone-aware for comparison
+            if token_time.tzinfo is None:
+                token_time = token_time.replace(tzinfo=timezone.utc)
+            
+            current_time = datetime.now(timezone.utc)
+            if current_time - token_time > timedelta(hours=24):
                 self.logger.warning("Stored token has expired")
                 return None
             
@@ -334,7 +339,12 @@ class ForensIQCLI:
             
             # Check if token is still valid (24 hours)
             token_time = datetime.fromisoformat(credentials['timestamp'])
-            if datetime.now(timezone.utc) - token_time > timedelta(hours=24):
+            # Make sure both datetimes are timezone-aware for comparison
+            if token_time.tzinfo is None:
+                token_time = token_time.replace(tzinfo=timezone.utc)
+            
+            current_time = datetime.now(timezone.utc)
+            if current_time - token_time > timedelta(hours=24):
                 self.logger.warning("Stored token has expired")
                 return False
             
@@ -535,7 +545,7 @@ class ForensIQCLI:
             cache_file = cache_dir / f"analysis_{log_hash}.json"
             
             cache_data = {
-                'timestamp': datetime.utcnow().isoformat(),
+                'timestamp': datetime.now(timezone.utc).isoformat(),
                 'log_content_hash': log_hash,
                 'result': result,
                 'user': self.config.get('username', 'unknown')
@@ -565,7 +575,7 @@ class ForensIQCLI:
                 
                 # Check if cache is still valid (e.g., less than 1 hour old)
                 cache_time = datetime.fromisoformat(cache_data['timestamp'])
-                if datetime.utcnow() - cache_time < timedelta(hours=1):
+                if datetime.now(timezone.utc) - cache_time < timedelta(hours=1):
                     info_message("Using cached analysis result")
                     return cache_data['result']
                     
@@ -878,6 +888,102 @@ class ForensIQCLI:
             )
         
         # Display monitoring start information
+        sources_str = ", ".join(sources) if sources else "all available sources"
+        info_message(f"Starting dynamic monitoring from {sources_str}")
+        info_message(f"Monitoring interval: {base_interval} seconds")
+        info_message(f"Extraction time range: {time_range} minutes")
+        
+        # Initialize dynamic extractor if not already done
+        if not hasattr(self, 'dynamic_extractor') or not self.dynamic_extractor:
+            from dynamic_log_extractor import DynamicLogExtractor
+            self.dynamic_extractor = DynamicLogExtractor()
+        
+        # Main monitoring loop
+        try:
+            next_interval = base_interval
+            while True:
+                try:
+                    # Extract logs from configured sources
+                    info_message(f"Extracting logs from {sources_str}...")
+                    extracted_logs = self.dynamic_extractor.extract_logs(sources, time_range)
+                    
+                    # Check if any logs were extracted
+                    total_logs = sum(len(logs) for logs in extracted_logs.values())
+                    if total_logs == 0:
+                        info_message("No new logs found in this interval")
+                    else:
+                        info_message(f"Extracted {total_logs} log entries")
+                        
+                        # Format logs for analysis
+                        formatted_logs = self.dynamic_extractor.format_logs_for_analysis(extracted_logs)
+                        
+                        if formatted_logs:
+                            # Analyze logs with AI agent
+                            enhance_with_ai = dynamic_config.get('auto_enhance', True)
+                            ai_agent_enabled = dynamic_config.get('ai_agent_enabled', True)
+                            
+                            info_message("Analyzing extracted logs...")
+                            result = await self.analyze_logs_with_storage(
+                                formatted_logs,
+                                session_id=session_id,
+                                is_dynamic=True
+                            )
+                            
+                            if result:
+                                # Display analysis summary
+                                summary = result.get('summary', 'No summary available')
+                                techniques = result.get('mitre_techniques', [])
+                                threat_level = result.get('threat_level', 'unknown')
+                                
+                                # Create a panel with the analysis summary
+                                summary_panel = Panel(
+                                    summary,
+                                    title="[bold]Analysis Summary[/bold]",
+                                    border_style=f"{'red' if threat_level == 'high' else 'yellow' if threat_level == 'medium' else 'green'}"
+                                )
+                                console.print(summary_panel)
+                                
+                                # Display detected MITRE techniques if any
+                                if techniques:
+                                    technique_table = Table(title="Detected MITRE ATT&CK Techniques")
+                                    technique_table.add_column("ID", style="cyan")
+                                    technique_table.add_column("Name", style="white")
+                                    technique_table.add_column("Confidence", style="green")
+                                    
+                                    for technique in techniques[:5]:  # Show top 5
+                                        technique_table.add_row(
+                                            technique.get('technique_id', 'Unknown'),
+                                            technique.get('technique_name', 'Unknown'),
+                                            f"{technique.get('confidence', 0):.2f}"
+                                        )
+                                    console.print(technique_table)
+                                
+                                # Adjust interval based on threat level
+                                if threat_level == 'high':
+                                    next_interval = max(60, base_interval // 3)  # At least every minute
+                                    warning_message(f"High threat detected! Increasing monitoring frequency to {next_interval} seconds")
+                                elif threat_level == 'medium':
+                                    next_interval = max(120, base_interval // 2)  # At least every 2 minutes
+                                    warning_message(f"Medium threat detected! Adjusting monitoring frequency to {next_interval} seconds")
+                                else:
+                                    next_interval = base_interval
+                    
+                except Exception as e:
+                    error_message(f"Error during monitoring cycle: {e}")
+                    next_interval = base_interval  # Reset to base interval on error
+                
+                # Wait for next interval
+                info_message(f"Next check in {next_interval} seconds...")
+                await asyncio.sleep(next_interval)
+                
+        except KeyboardInterrupt:
+            info_message("Dynamic monitoring stopped by user")
+        except Exception as e:
+            error_message(f"Dynamic monitoring error: {e}")
+        finally:
+            # Close MongoDB connection if open
+            if self.mongodb_service:
+                await self.mongodb_service.close_async()
         panel = Panel.fit(
             f"[bold green]Dynamic Monitoring Started[/bold green]\n\n"
             f"[cyan]Session ID:[/cyan] {session_id or 'N/A'}\n"
@@ -1427,19 +1533,23 @@ class ForensIQCLI:
         """Monitor log file and send updates at configured intervals with MongoDB storage."""
         log_path = self.config.get('monitoring', {}).get('log_path')
         base_interval = self.config.get('monitoring', {}).get('interval', 300)  # Default 5 minutes
+        use_dynamic_extraction = self.config.get('monitoring', {}).get('use_dynamic_extraction', False)
         
-        if not log_path or not os.path.exists(log_path):
+        if not use_dynamic_extraction and (not log_path or not os.path.exists(log_path)):
             error_message(f"Log file not found: {log_path}")
             return
         
         # Create monitoring session in database
-        session_id = await self._create_monitoring_session(log_path, base_interval)
+        session_id = await self._create_monitoring_session(log_path, base_interval, use_dynamic_extraction)
         if not session_id:
             error_message("Failed to create monitoring session")
             return
         
         info_message(f"Starting log monitoring session: {session_id}")
-        info_message(f"Log file: {log_path}")
+        if use_dynamic_extraction:
+            info_message("Using dynamic log extraction from system sources")
+        else:
+            info_message(f"Log file: {log_path}")
         info_message(f"Base interval: {base_interval} seconds")
         
         last_position = self.config.get('last_file_position', 0)
@@ -1449,29 +1559,49 @@ class ForensIQCLI:
         try:
             while True:
                 try:
-                    # Check if file still exists
-                    if not os.path.exists(log_path):
-                        error_message(f"Log file disappeared: {log_path}")
-                        break
-                    
-                    # Read new content from file
-                    current_size = os.path.getsize(log_path)
-                    
-                    if current_size > last_position:
-                        # Read new content
-                        with open(log_path, 'r', encoding='utf-8', errors='ignore') as f:
-                            f.seek(last_position)
-                            new_content = f.read()
+                    # Check if using dynamic extraction or file monitoring
+                    if self.config.get('monitoring', {}).get('use_dynamic_extraction', False):
+                        # Use dynamic log extractor to get logs from system sources
+                        if not self.dynamic_extractor:
+                            error_message("Dynamic log extractor not available")
+                            break
                         
-                        if new_content.strip():
-                            info_message(f"Processing {len(new_content):,} new characters from log")
+                        info_message("Extracting logs from system sources...")
+                        new_content = await asyncio.to_thread(self.dynamic_extractor.extract_logs)
+                        
+                        if new_content:
+                            info_message(f"Extracted {len(new_content):,} characters from system sources")
                             
                             # Analyze logs with AI agent enhancement
                             result = await self.analyze_logs_with_storage(
                                 new_content, 
                                 session_id=session_id,
-                                log_file_path=log_path
+                                is_dynamic=True
                             )
+                    else:
+                        # Check if file still exists
+                        if not os.path.exists(log_path):
+                            error_message(f"Log file disappeared: {log_path}")
+                            break
+                        
+                        # Read new content from file
+                        current_size = os.path.getsize(log_path)
+                        
+                        if current_size > last_position:
+                            # Read new content
+                            with open(log_path, 'r', encoding='utf-8', errors='ignore') as f:
+                                f.seek(last_position)
+                                new_content = f.read()
+                            
+                            if new_content.strip():
+                                info_message(f"Processing {len(new_content):,} new characters from log")
+                                
+                                # Analyze logs with AI agent enhancement
+                                result = await self.analyze_logs_with_storage(
+                                    new_content, 
+                                    session_id=session_id,
+                                    log_file_path=log_path
+                                )
                             
                             if result:
                                 # Update file position
@@ -1502,19 +1632,17 @@ class ForensIQCLI:
                                 error_message(f"Analysis failed (error {consecutive_errors}/{max_errors})")
                                 await asyncio.sleep(base_interval)
                         else:
-                            # No new content, wait shorter interval
-                            await asyncio.sleep(min(base_interval, 60))
-                    
-                    elif current_size < last_position:
-                        # File was truncated or rotated
-                        info_message("Log file was truncated or rotated, resetting position")
-                        last_position = 0
-                        self.config['last_file_position'] = 0
-                        self._save_config()
-                        await asyncio.sleep(5)
-                    else:
-                        # No new content
-                        await asyncio.sleep(min(base_interval, 60))
+                            # Check if file was truncated or rotated
+                            if current_size < last_position:
+                                # File was truncated or rotated
+                                info_message("Log file was truncated or rotated, resetting position")
+                                last_position = 0
+                                self.config['last_file_position'] = 0
+                                self._save_config()
+                                await asyncio.sleep(5)
+                            else:
+                                # No new content, wait shorter interval
+                                await asyncio.sleep(min(base_interval, 60))
                 
                 except Exception as e:
                     consecutive_errors += 1
@@ -1537,7 +1665,7 @@ class ForensIQCLI:
             await self._stop_monitoring_session(session_id)
             info_message("Monitoring session ended")
 
-    async def _create_monitoring_session(self, log_path: str, interval: int) -> Optional[str]:
+    async def _create_monitoring_session(self, log_path: str, interval: int, use_dynamic_extraction: bool = False) -> Optional[str]:
         """Create monitoring session in the database."""
         try:
             if not self.session_token:
@@ -1548,10 +1676,18 @@ class ForensIQCLI:
             headers = self._get_auth_headers()
             
             session_data = {
-                'log_path': log_path,
                 'interval_seconds': interval,
-                'ai_agent_enabled': self.config.get('ai_agent_enabled', True)
+                'ai_agent_enabled': self.config.get('ai_agent_enabled', True),
+                'use_dynamic_extraction': use_dynamic_extraction
             }
+            
+            # Add log path only if not using dynamic extraction
+            if not use_dynamic_extraction:
+                session_data['log_path'] = log_path
+            else:
+                # Add dynamic extraction configuration
+                if self.dynamic_extractor:
+                    session_data['extraction_sources'] = self.dynamic_extractor.get_available_sources()
             
             async with aiohttp.ClientSession() as session:
                 async with session.post(
@@ -1591,7 +1727,7 @@ class ForensIQCLI:
             error_message(f"Error stopping monitoring session: {e}")
 
     async def analyze_logs_with_storage(self, log_content: str, session_id: Optional[str] = None, 
-                                      log_file_path: Optional[str] = None) -> Optional[Dict[str, Any]]:
+                                      log_file_path: Optional[str] = None, is_dynamic: bool = False) -> Optional[Dict[str, Any]]:
         """
         Analyze logs and store results in MongoDB.
         
@@ -1599,6 +1735,7 @@ class ForensIQCLI:
             log_content: Log content to analyze
             session_id: Associated monitoring session ID
             log_file_path: Path to the log file
+            is_dynamic: Whether the logs were extracted dynamically
             
         Returns:
             Analysis result or None if failed
@@ -1611,6 +1748,11 @@ class ForensIQCLI:
                 result = await self.send_logs(log_content, enhance_with_ai=True)
             
             if result:
+                # Add dynamic extraction metadata if applicable
+                if is_dynamic and self.dynamic_extractor:
+                    result['source_type'] = 'dynamic_extraction'
+                    result['extraction_sources'] = self.dynamic_extractor.get_available_sources()
+                
                 # Store in MongoDB via API
                 await self._store_analysis_result(result, log_content, session_id, log_file_path)
                 return result

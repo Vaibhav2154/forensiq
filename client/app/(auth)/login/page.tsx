@@ -114,7 +114,7 @@ const ProfessionalTerminalLogin: React.FC = () => {
       addTerminalLine('Authenticating...', 'info');
       console.log(username, currentInput);
       //console.log(process.env.NEXT_PUBLIC_API_BASE_URL);
-      fetch(`${process.env.NEXT_PUBLIC_API_BASE_URL}/login`, {
+      fetch(`${process.env.NEXT_PUBLIC_API_BASE_URL|| 'http://localhost:8000'}/login`, {
         method: 'POST',
         headers: {
           'Content-Type': 'application/json',
