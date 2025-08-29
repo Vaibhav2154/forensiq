@@ -197,7 +197,7 @@ const router = useRouter();
     
     */
    console.log(data)
-    fetch('https://localhost:8000/register', {
+    fetch(`${process.env.NEXT_PUBLIC_API_BASE_URL}/register`, {
       method: 'POST',
       headers: {
         'Content-Type': 'application/json',

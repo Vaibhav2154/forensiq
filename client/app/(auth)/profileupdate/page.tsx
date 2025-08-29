@@ -40,7 +40,7 @@ const ProfessionalTerminalProfileUpdate: React.FC = () => {
   const [showPrompt, setShowPrompt] = useState(false);
   const [errors, setErrors] = useState<string[]>([]);
   const [authToken, setAuthToken] = useState<string | null>(null); // Demo token for display
-  const [apiBaseUrl] = useState('http://localhost:8000');
+  const [apiBaseUrl] = useState(process.env.NEXT_PUBLIC_API_BASE_URL);
   const terminalRef = useRef<HTMLDivElement>(null);
   const inputRef = useRef<HTMLInputElement>(null);
 

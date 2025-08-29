@@ -2,6 +2,7 @@
 import React, { useState, useEffect, useRef } from 'react';
 import {useRouter} from 'next/navigation'
 
+
 interface TerminalLine {
   id: number;
   text: string;
@@ -109,7 +110,8 @@ const ProfessionalTerminalLogin: React.FC = () => {
       addTerminalLine('', 'system');
       addTerminalLine('Authenticating...', 'info');
       console.log(username, currentInput);
-      fetch('https://localhost:8000/login', {
+      //console.log(process.env.NEXT_PUBLIC_API_BASE_URL);
+      fetch(`${process.env.NEXT_PUBLIC_API_BASE_URL}/login`, {
         method: 'POST',
         headers: {
           'Content-Type': 'application/json',
