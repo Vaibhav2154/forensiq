@@ -1,0 +1,44 @@
+[
+  {
+    "_id": "64f7b8c9e123456789abcdef",
+    "username": "admin",
+    "timestamp": "2025-08-29T15:30:45.123Z",
+    "log_source": "security_events",
+    "summary": "Detected multiple failed login attempts and privilege escalation attempts from suspicious IP addresses",
+    "matched_techniques": [
+      {
+        "technique_id": "T1078",
+        "name": "Valid Accounts",
+        "relevance_score": 0.92
+      },
+      {
+        "technique_id": "T1110",
+        "name": "Brute Force",
+        "relevance_score": 0.88
+      },
+      {
+        "technique_id": "T1548",
+        "name": "Abuse Elevation Control Mechanism",
+        "relevance_score": 0.75
+      }
+    ],
+    "ai_enhanced": true,
+    "threat_score": 0.87
+  },
+  {
+    "_id": "64f7b8c9e123456789abcde0",
+    "username": "analyst01",
+    "timestamp": "2025-08-29T15:25:30.456Z",
+    "log_source": "network_connections",
+    "summary": "Unusual outbound network connections to external domains during off-hours",
+    "matched_techniques": [
+      {
+        "technique_id": "T1071",
+        "name": "Application Layer Protocol",
+        "relevance_score": 0.65
+      }
+    ],
+    "ai_enhanced": true,
+    "threat_score": 0.45
+  }
+]

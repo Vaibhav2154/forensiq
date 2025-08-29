@@ -1,0 +1,3 @@
+id,username,timestamp,log_source,summary,technique_count,threat_score,ai_enhanced
+64f7b8c9e123456789abcdef,admin,2025-08-29T15:30:45.123Z,security_events,Detected multiple failed login attempts and privilege escalation attempts from suspicious IP addresses,3,0.87,True
+64f7b8c9e123456789abcde0,analyst01,2025-08-29T15:25:30.456Z,network_connections,Unusual outbound network connections to external domains during off-hours,1,0.45,True
