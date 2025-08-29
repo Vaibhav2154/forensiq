@@ -40,7 +40,7 @@ const ProfessionalTerminalProfileUpdate: React.FC = () => {
   const [showPrompt, setShowPrompt] = useState(false);
   const [errors, setErrors] = useState<string[]>([]);
   const [authToken, setAuthToken] = useState<string | null>(null); // Demo token for display
-  const [apiBaseUrl] = useState('https://39619b5d65b6.ngrok-free.app');
+  const [apiBaseUrl] = useState('http://localhost:8000');
   const terminalRef = useRef<HTMLDivElement>(null);
   const inputRef = useRef<HTMLInputElement>(null);
 
@@ -135,15 +135,14 @@ const ProfessionalTerminalProfileUpdate: React.FC = () => {
   const showMainMenu = () => {
     addTerminalLine('Profile Update Menu:', 'info');
     addTerminalLine('1. Update Username', 'system');
-    addTerminalLine('2. Update Email Address', 'system');
-    addTerminalLine('3. Change Password', 'system');
-    addTerminalLine('4. Review Current Profile', 'system');
-    addTerminalLine('5. Save All Changes', 'system');
-    addTerminalLine('6. Delete Account', 'system');
-    addTerminalLine('7. Logout', 'system');
-    addTerminalLine('8. Cancel and Exit', 'system');
+    addTerminalLine('2. Change Password', 'system');
+    addTerminalLine('3. Review Current Profile', 'system');
+    addTerminalLine('4. Save All Changes', 'system');
+    addTerminalLine('5. Delete Account', 'system');
+    addTerminalLine('6. Logout', 'system');
+    addTerminalLine('7. Cancel and Exit', 'system');
     addTerminalLine('', 'system');
-    addTerminalLine('Enter your choice (1-8):', 'prompt');
+    addTerminalLine('Enter your choice (1-7):', 'prompt');
     setCurrentStep('menu');
     setShowPrompt(true);
   };
@@ -184,37 +183,32 @@ const ProfessionalTerminalProfileUpdate: React.FC = () => {
         promptForField('username');
         break;
       case '2':
-        addTerminalLine('Selected: Update Email Address', 'info');
-        addTerminalLine('', 'system');
-        promptForField('email');
-        break;
-      case '3':
         addTerminalLine('Selected: Change Password', 'info');
         addTerminalLine('', 'system');
         changePassword();
         break;
-      case '4':
+      case '3':
         addTerminalLine('Selected: Review Current Profile', 'info');
         addTerminalLine('', 'system');
         showCurrentProfile();
         break;
-      case '5':
+      case '4':
         addTerminalLine('Selected: Save All Changes', 'info');
         addTerminalLine('', 'system');
         reviewChanges();
         break;
-      case '6':
+      case '5':
         addTerminalLine('Selected: Delete Account', 'warning');
         addTerminalLine('', 'system');
         confirmDeleteAccount();
         break;
-    case '7':
+    case '6':
         addTerminalLine('Selected: Logout', 'info');
         addTerminalLine('','system')
         logout();
         router.push('/');
         break;
-      case '8':
+      case '7':
         addTerminalLine('Selected: Cancel and Exit', 'warning');
         addTerminalLine('Exiting profile update...', 'info');
         setTimeout(() => {
@@ -394,9 +388,9 @@ const ProfessionalTerminalProfileUpdate: React.FC = () => {
   const updateUserProfile = async (updateData: { email?: string; username?: string}) => {
     console.log(updateData)
     try {
-      addTerminalLine(`PUT ${apiBaseUrl}/users/me`, 'system');
+     // addTerminalLine(`PUT ${apiBaseUrl}/updateusername`, 'system');
       console.log(authToken)
-      const response = await fetch(`${apiBaseUrl}/users/me`, {
+      const response = await fetch(`${apiBaseUrl}/users/update-username`, {
         method: 'PUT',
         headers: {
           'Content-Type': 'application/json',
@@ -638,8 +632,8 @@ if (changedFields.has('email')){
   const restartUpdate = () => {
     setTerminalLines([]);
     setProfile({
-      username: 'demo_user',
-      email: 'user@example.com',
+      username: localStorage.getItem('user.username') || '',
+      email: localStorage.getItem('user.email') || '',
       currentPassword: '',
       newPassword: '',
       confirmPassword: ''

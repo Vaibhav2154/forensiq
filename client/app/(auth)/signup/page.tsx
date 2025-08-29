@@ -197,7 +197,7 @@ const router = useRouter();
     
     */
    console.log(data)
-    fetch('https://39619b5d65b6.ngrok-free.app/register', {
+    fetch('https://localhost:8000/register', {
       method: 'POST',
       headers: {
         'Content-Type': 'application/json',

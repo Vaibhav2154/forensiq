@@ -109,7 +109,7 @@ const ProfessionalTerminalLogin: React.FC = () => {
       addTerminalLine('', 'system');
       addTerminalLine('Authenticating...', 'info');
       console.log(username, currentInput);
-      fetch('https://39619b5d65b6.ngrok-free.app/login', {
+      fetch('https://localhost:8000/login', {
         method: 'POST',
         headers: {
           'Content-Type': 'application/json',
