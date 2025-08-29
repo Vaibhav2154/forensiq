@@ -1,6 +1,7 @@
 'use client'
 import React, { useState, useEffect } from 'react'
 import Navbar from '../../../components/navbar'
+import Chatbot from '@/components/chatbot';
 
 interface Technique {
   id: string;
@@ -296,7 +297,7 @@ const MitrePage = () => {
         <div className="hidden md:block absolute top-48 right-12 text-green-500/20 font-mono text-xs animate-pulse delay-1000">
           &gt; ./attack_navigator.exe
         </div>
-        
+        <Chatbot/>
         <div className="hidden sm:block absolute bottom-32 left-16 text-green-500/20 font-mono text-xs animate-pulse delay-2000">
           [MITRE@FORENSIQ]#
         </div>
