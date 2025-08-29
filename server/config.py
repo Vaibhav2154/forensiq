@@ -9,6 +9,10 @@ class Config:
     CHROMA_PERSIST_DIRECTORY = os.getenv("CHROMA_PERSIST_DIRECTORY", "./chroma_db")
     EMBEDDING_MODEL = "all-MiniLM-L6-v2"
     
+    # Server Configuration
+    HOST = os.getenv("HOST", "0.0.0.0")
+    PORT = int(os.getenv("PORT", 8000))  # Render sets PORT env variable
+    
     # AWS Configuration for Bedrock Titan
     AWS_REGION = os.getenv("AWS_REGION", "us-east-1")
     AWS_ACCESS_KEY_ID = os.getenv("AWS_ACCESS_KEY_ID")

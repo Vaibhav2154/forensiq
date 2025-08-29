@@ -145,7 +145,7 @@ if __name__ == "__main__":
     import uvicorn
     uvicorn.run(
         "main:app",
-        host="0.0.0.0",
-        port=8000,
+        host=Config.HOST,
+        port=Config.PORT,
         log_level=Config.LOG_LEVEL.lower()
     )
