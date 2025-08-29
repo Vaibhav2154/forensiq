@@ -16,6 +16,6 @@ def extract_iocs(log_message: str) -> list[dict]:
         matches = re.findall(pattern, log_message)
         for match in matches:
             if match not in seen_iocs:
-                found_iocs.append({"type": ioc_type, "value": match})
+scm-history-item:c%3A%5CProjects%5Cforensiq?%7B%22repositoryId%22%3A%22scm0%22%2C%22historyItemId%22%3A%22dbd5009a2366601ef857ec2e2dd82b4a03c48903%22%2C%22historyItemParentId%22%3A%2242da03f68724325a62a164fba3c7f4c4ff54f9cd%22%2C%22historyItemDisplayId%22%3A%22dbd5009%22%7D                found_iocs.append({"type": ioc_type, "value": match})
                 seen_iocs.add(match)
     return found_iocs
