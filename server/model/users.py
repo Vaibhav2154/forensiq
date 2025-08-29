@@ -29,3 +29,11 @@ class Token(BaseModel):
 
 class TokenData(BaseModel):
     username: str | None
+
+class updatedUser(BaseModel):
+    email:str|None = None
+    username:str | None = None
+
+class UserUpdateUsername(BaseModel):
+    email: EmailStr
+    username: str
