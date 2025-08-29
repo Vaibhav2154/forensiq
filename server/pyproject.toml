@@ -18,3 +18,9 @@ dependencies = [
     "sentence-transformers",
     "chromadb>=1.0.20",
 ]
+
+[tool.setuptools.packages.find]
+# Tells setuptools to look for packages in the current directory
+where = ["."]
+# Explicitly include your package directories
+include = ["core*", "model*", "routers*", "services*"]
