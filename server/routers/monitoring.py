@@ -30,6 +30,7 @@ class StoreAnalysisRequest(BaseModel):
     analysis_result: Dict[str, Any] = Field(..., description="Analysis result from API")
     session_id: Optional[str] = Field(None, description="Associated monitoring session ID")
     log_file_path: Optional[str] = Field(None, description="Path to original log file")
+    username: Optional[str] = Field(None, description="Username of the authenticated user")
 
 class SessionResponse(BaseModel):
     """Response model for session operations."""
@@ -149,7 +150,8 @@ async def store_analysis_result(
 ):
     """Store analysis result in MongoDB."""
     try:
-        user_id = current_user.get('username')
+        # Use the provided username if available, otherwise use the authenticated user
+        user_id = request.username if request.username else current_user.get('username')
         
         # Extract the actual analysis data from additionalProp1
         actual_analysis_data = request.analysis_result.get('additionalProp1', {})

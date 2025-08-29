@@ -1773,11 +1773,15 @@ class ForensIQCLI:
             api_url = self.config.get('api_url', 'http://localhost:8000')
             headers = self._get_auth_headers()
             
+            # Get the authenticated username from config
+            username = self.config.get('username', 'unknown')
+            
             storage_data = {
                 'log_content': log_content,
                 'analysis_result': analysis_result,
                 'session_id': session_id,
-                'log_file_path': log_file_path
+                'log_file_path': log_file_path,
+                'username': username  # Include the authenticated username
             }
             
             async with aiohttp.ClientSession() as session:

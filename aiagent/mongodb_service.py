@@ -85,12 +85,13 @@ class MongoDBService:
         if self.async_client:
             self.async_client.close()
     
-    async def store_analysis_result(self, analysis_data: Dict[str, Any]) -> Optional[str]:
+    async def store_analysis_result(self, analysis_data: Dict[str, Any], username: str = None) -> Optional[str]:
         """
         Store analysis result in MongoDB.
         
         Args:
             analysis_data: Analysis result data
+            username: Username of the authenticated user
             
         Returns:
             str: Inserted document ID or None if failed
@@ -99,10 +100,13 @@ class MongoDBService:
             if not self.async_client:
                 await self.connect_async()
             
+            # Use the provided username if available, otherwise fallback to the one in analysis_data
+            user = username if username else analysis_data.get('user', 'unknown')
+            
             # Prepare document
             document = {
                 'timestamp': datetime.utcnow(),
-                'user': analysis_data.get('user', 'unknown'),
+                'user': user,
                 'log_source': analysis_data.get('log_source', 'dynamic'),
                 'analysis_result': analysis_data.get('result', {}),
                 'processing_time_ms': analysis_data.get('processing_time_ms', 0),
@@ -111,7 +115,7 @@ class MongoDBService:
                 'status': 'completed'
             }
             
-            collection = self.async_database.get_collection("log_analysis")
+            collection = self.async_database.get_collection("analysis_results")
             result = await collection.insert_one(document)
             
             return str(result.inserted_id)
