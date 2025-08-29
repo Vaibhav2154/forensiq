@@ -418,7 +418,7 @@ tokenizers==0.22.0
     # via
     #   chromadb
     #   transformers
-torch==2.8.0
+torch==2.8.0+cpu --index-url https://download.pytorch.org/whl/cpu
     # via sentence-transformers
 tqdm==4.67.1
     # via
