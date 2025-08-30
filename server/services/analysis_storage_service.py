@@ -17,6 +17,13 @@ class AnalysisStorageService:
         self.collection = database.get_collection("analysis_results")
         self.sessions_collection = database.get_collection("monitoring_sessions")
     
+    @staticmethod
+    def convert_datetime_to_string(value):
+        """Convert datetime objects to ISO format strings for JSON serialization."""
+        if isinstance(value, datetime):
+            return value.isoformat()
+        return value
+    
     async def store_analysis_result(self, user_id: str, request, response) -> str:
         """Store encrypted analysis result."""
         try:
@@ -121,7 +128,7 @@ class AnalysisStorageService:
                 "summary": decrypted_data.get("summary"),
                 "matched_techniques": decrypted_data.get("techniques"),
                 "enhanced_analysis": decrypted_data.get("enhanced_analysis"),
-                "analysis_timestamp": doc.get("analysis_timestamp"),
+                "analysis_timestamp": self.convert_datetime_to_string(doc.get("analysis_timestamp")),
                 "processing_time_ms": doc.get("processing_time_ms", 0)
             }
             
@@ -140,7 +147,7 @@ class AnalysisStorageService:
             async for doc in cursor:
                 analyses.append({
                     "id": str(doc.get("_id")),
-                    "analysis_timestamp": doc.get("analysis_timestamp"),
+                    "analysis_timestamp": self.convert_datetime_to_string(doc.get("analysis_timestamp")),
                     "processing_time_ms": doc.get("processing_time_ms", 0),
                     "techniques_count": doc.get("techniques_count", 0),
                     "logs_preview": "Preview unavailable"
@@ -204,8 +211,8 @@ class AnalysisStorageService:
                     "interval_seconds": doc.get("interval_seconds", 300),
                     "ai_agent_enabled": doc.get("ai_agent_enabled", True),
                     "status": doc.get("status"),
-                    "created_at": doc.get("created_at"),
-                    "last_checked": doc.get("last_checked")
+                    "created_at": self.convert_datetime_to_string(doc.get("created_at")),
+                    "last_checked": self.convert_datetime_to_string(doc.get("last_checked"))
                 })
             
             return sessions
@@ -227,9 +234,9 @@ class AnalysisStorageService:
                 "interval_seconds": doc.get("interval_seconds", 300),
                 "ai_agent_enabled": doc.get("ai_agent_enabled", True),
                 "status": doc.get("status"),
-                "created_at": doc.get("created_at"),
-                "last_checked": doc.get("last_checked"),
-                "stopped_at": doc.get("stopped_at")
+                "created_at": self.convert_datetime_to_string(doc.get("created_at")),
+                "last_checked": self.convert_datetime_to_string(doc.get("last_checked")),
+                "stopped_at": self.convert_datetime_to_string(doc.get("stopped_at"))
             }
         except Exception as e:
             logger.error(f"Failed to get monitoring session {session_id}: {e}")
@@ -261,91 +268,23 @@ class AnalysisStorageService:
                 "period_days": days
             }
 
-analysis_storage_service = AnalysisStorageService()
-
-from fastapi import APIRouter, Depends, HTTPException
-from pydantic import BaseModel
-
-router = APIRouter()
-
-# Request and response models
-class StoreAnalysisRequest(BaseModel):
-    log_content: str
-    analysis_result: dict
-
-class AnalysisResponse(BaseModel):
-    analysis_id: str
-    status: str
-    message: str
-
-# Dependency
-async def get_current_user():
-    # Mock implementation - replace with actual user retrieval logic
-    return {"username": "test_user"}
-
-@router.post("/analysis/store", response_model=AnalysisResponse)
-async def store_analysis_result(
-    request: StoreAnalysisRequest,
-    current_user: dict = Depends(get_current_user)
-):
-    """Store analysis result in MongoDB."""
-    try:
-        user_id = current_user.get('username')
-        
-        # Debug what we received in the request
-        logger.info(f"Received analysis request:")
-        logger.info(f"  - Summary: '{request.analysis_result.get('summary', '')}' (len: {len(request.analysis_result.get('summary', ''))})")
-        logger.info(f"  - Techniques: {request.analysis_result.get('matched_techniques', [])} (count: {len(request.analysis_result.get('matched_techniques', []))})")
-        logger.info(f"  - Enhanced analysis: {request.analysis_result.get('enhanced_analysis', 'None')}")
-        
-        # Create technique objects that have model_dump method
-        class TechniqueWrapper:
-            def __init__(self, tech_data):
-                self._data = tech_data
+    async def delete_analysis_result(self, user_id: str, analysis_id: str) -> bool:
+        """Delete an analysis result for a specific user."""
+        try:
+            result = await self.collection.delete_one({
+                "user_id": user_id,
+                "_id": ObjectId(analysis_id)
+            })
             
-            def model_dump(self):
-                return self._data
-        
-        # Create response object directly from your request data
-        class DirectResponse:
-            def __init__(self, analysis_result):
-                # Use the actual data from your request
-                self.summary = analysis_result.get('summary', '')
-                self.enhanced_analysis = analysis_result.get('enhanced_analysis', None)
-                self.processing_time_ms = analysis_result.get('processing_time_ms', 0)
+            if result.deleted_count > 0:
+                logger.info(f"Deleted analysis {analysis_id} for user {user_id}")
+                return True
+            else:
+                logger.warning(f"Analysis {analysis_id} not found for user {user_id}")
+                return False
                 
-                # Wrap each technique in an object with model_dump
-                self.matched_techniques = []
-                for tech_data in analysis_result.get('matched_techniques', []):
-                    wrapped_tech = TechniqueWrapper(tech_data)
-                    self.matched_techniques.append(wrapped_tech)
-        
-        class DirectRequest:
-            def __init__(self, log_content):
-                self.logs = log_content
-        
-        direct_request = DirectRequest(request.log_content)
-        direct_response = DirectResponse(request.analysis_result)
-        
-        # Debug what we're about to store
-        logger.info(f"About to store:")
-        logger.info(f"  - Summary: '{direct_response.summary}' (len: {len(direct_response.summary)})")
-        logger.info(f"  - Techniques count: {len(direct_response.matched_techniques)}")
-        logger.info(f"  - Enhanced analysis: '{direct_response.enhanced_analysis}'")
-        
-        # Store using the storage service
-        analysis_id = await analysis_storage_service.store_analysis_result(
-            user_id=user_id,
-            request=direct_request,
-            response=direct_response
-        )
-        
-        return AnalysisResponse(
-            analysis_id=analysis_id,
-            status="stored", 
-            message="Analysis result stored successfully"
-        )
-        
-    except Exception as e:
-        logger.error(f"Failed to store analysis: {e}")
-        raise HTTPException(status_code=500, detail=str(e))
+        except Exception as e:
+            logger.error(f"Failed to delete analysis {analysis_id}: {e}")
+            return False
+
+analysis_storage_service = AnalysisStorageService()

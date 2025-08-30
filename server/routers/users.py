@@ -1,6 +1,7 @@
 from fastapi import APIRouter, Depends, HTTPException, status
 from pydantic import BaseModel
 from typing import Optional
+from bson import ObjectId
 
 from core import security
 from core.config import settings
@@ -48,11 +49,13 @@ async def update_current_user(
             raise HTTPException(status_code=400, detail="Email already registered")
     
     if "username" in update_data:
-        existing_username = await database.user_collection.find_one(
-            {"username": update_data["username"], "username": {"$ne": current_user["username"]}}
-        )
-        if existing_username:
-            raise HTTPException(status_code=400, detail="Username already taken")
+        # Skip check if user is updating to the same username
+        if update_data["username"] != current_user["username"]:
+            existing_username = await database.user_collection.find_one(
+                {"username": update_data["username"]}
+            )
+            if existing_username:
+                raise HTTPException(status_code=400, detail="Username already taken")
     
     # Update the user
     result = await database.user_collection.update_one(
@@ -60,10 +63,7 @@ async def update_current_user(
         {"$set": update_data}
     )
     
-    if result.modified_count == 0:
-        raise HTTPException(status_code=400, detail="No changes made")
-    
-    # Return updated user
+    # Return updated user 
     updated_user = await database.user_collection.find_one({"username": current_user["username"]})
     return UserBase(**updated_user)
 

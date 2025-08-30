@@ -14,8 +14,6 @@ class LoginRequest(BaseModel):
 class UserUpdate(BaseModel):
     email: str | None = None
     username: str | None = None
-    full_name: str | None = None
-
 class PasswordChange(BaseModel):
     current_password: str
     new_password: str
