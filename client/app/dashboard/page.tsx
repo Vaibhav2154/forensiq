@@ -1,5 +1,5 @@
-'use client'
-import React, { useState, useEffect } from 'react'
+ 'use client'
+import React, { useState, useEffect, use } from 'react'
 import Link from 'next/link'
 import Navbar from '../../components/navbar'
 
@@ -9,6 +9,9 @@ const DashboardPage = () => {
   const [terminalText, setTerminalText] = useState('')
   const [showCursor, setShowCursor] = useState(true)
   const [isMobile, setIsMobile] = useState(false)
+  const [recentAnalyses, setRecentAnalyses] = useState<any[]>([]);
+  const [singleAnalysis, setSingleAnalysis] = useState<any | null>(null);
+  const [allSingleAnalysis, setAllSingleAnalysis] = useState<any[]>([]);
 
   const fullTerminalText = '> FORENSIQ_DASHBOARD.EXE --MODE=OPERATIONAL'
 
@@ -73,7 +76,7 @@ const DashboardPage = () => {
       shortTitle: 'MITRE_ATTACK',
       description: 'Comprehensive threat intelligence and attack technique database',
       shortDescription: 'Threat intelligence and attack technique database',
-      icon: '🛡️',
+      icon: '🛡',
       href: '/dashboard/mitre',
       color: 'green',
       stats: 'ENTERPRISE_TECH'
@@ -83,49 +86,87 @@ const DashboardPage = () => {
       shortTitle: 'THREAT_INTEL',
       description: 'Advanced threat detection and response capabilities',
       shortDescription: 'Advanced threat detection and response',
-      icon: '⚠️',
+      icon: '⚠',
       href: '/dashboard/threats',
       color: 'red',
       stats: 'COMING_SOON'
     }
   ]
 
-  const recentAnalyses = [
-    {
-      id: 1,
-      type: 'System Break Out',
-      shortType: 'System Break',
-      timestamp: '2025-08-29 05:08:30',
-      shortTimestamp: '08-29 05:08',
-      techniques: 5,
-      hasVisualization: true,
-      severity: 'Critical',
-      status: 'Completed'
-    },
-    {
-      id: 2,
-      type: 'Privilege Escalation',
-      shortType: 'Priv Escalation',
-      timestamp: '2025-08-29 04:45:12',
-      shortTimestamp: '08-29 04:45',
-      techniques: 3,
-      hasVisualization: true,
-      severity: 'High',
-      status: 'Completed'
-    },
-    {
-      id: 3,
-      type: 'Lateral Movement',
-      shortType: 'Lateral Move',
-      timestamp: '2025-08-29 03:22:18',
-      shortTimestamp: '08-29 03:22',
-      techniques: 7,
-      hasVisualization: true,
-      severity: 'Critical',
-      status: 'Completed'
+  const handleRecentAnalyses = async()=>{
+    try{
+      const response = await fetch(`${process.env.NEXT_PUBLIC_API_BASE_URL}/api/v1/history?limit=10&offset=0`, {
+        headers: {
+          'Content-Type': 'application/json',
+          'Authorization': `Bearer ${localStorage.getItem('token')}`
+        },
+      });
+      if (!response.ok) {
+        throw new Error(`Failed to fetch recent analyses: ${response.statusText}`);
+      }
+      const data = await response.json();
+      setRecentAnalyses(data);
+      console.log(data);
+    }catch(err){
+      const errorMessage = err instanceof Error ? err.message : 'Failed to fetch recent analyses';
+      console.log(errorMessage);
     }
-  ]
+  }
+  useEffect(()=>{
+    handleRecentAnalyses();
+  },[])
 
+  const recentSingleAnalyses  = async(elementId:string)=>{
+    try{
+      const response = await fetch(`${process.env.NEXT_PUBLIC_API_BASE_URL}/api/v1/history/${elementId}`, {
+        headers: {
+          'Content-Type': 'application/json',
+          'Authorization': `Bearer ${localStorage.getItem('token')}`
+        },
+        
+      });
+      if (!response.ok) {
+        throw new Error(`Failed to fetch recent single analysis: ${response.statusText}`);
+      }
+      const data = await response.json();
+      setSingleAnalysis(data);
+      console.log(data);
+    }catch(err){
+      const errorMessage = err instanceof Error ? err.message : 'Failed to fetch recent single analysis';
+      console.log(errorMessage);
+    }
+  }
+  const allAnalysis = async () => {
+  try {
+    if (recentAnalyses.length === 0) return;
+
+    const results = await Promise.all(
+      recentAnalyses.map(async (item) => {
+        const response = await fetch(
+          `${process.env.NEXT_PUBLIC_API_BASE_URL}/api/v1/history/${item.id}`,
+          {
+            headers: {
+              "Content-Type": "application/json",
+              Authorization: `Bearer ${localStorage.getItem("token")}`,
+            },
+            
+          }
+        );
+        if (!response.ok) throw new Error(`Failed to fetch analysis ${item.id}`);
+        return response.json();
+      })
+    );
+
+    setAllSingleAnalysis(results); // update state once
+    console.log("All single analyses:", results);
+  } catch (err) {
+    console.log(err);
+  }
+};
+
+  useEffect(()=>{
+    allAnalysis();
+  },[recentAnalyses])
   const getColorClasses = (color: string) => {
     switch (color) {
       case 'cyan': return 'border-cyan-500/30 hover:border-cyan-400 text-cyan-400 bg-cyan-500/10'
@@ -137,7 +178,7 @@ const DashboardPage = () => {
   }
 
   const getSeverityColor = (severity: string) => {
-    switch (severity.toLowerCase()) {
+    switch (severity?.toLowerCase()) {
       case 'critical': return 'text-red-400 bg-red-900/30 border-red-500/30'
       case 'high': return 'text-orange-400 bg-orange-900/30 border-orange-500/30'
       case 'medium': return 'text-yellow-400 bg-yellow-900/30 border-yellow-500/30'
@@ -221,7 +262,7 @@ const DashboardPage = () => {
                 <p className="text-green-400 text-xs">[MITRE_TECHNIQUES]</p>
                 <p className="text-xl sm:text-2xl font-bold text-green-400">578</p>
               </div>
-              <div className="text-green-400 text-lg sm:text-xl">🛡️</div>
+              <div className="text-green-400 text-lg sm:text-xl">🛡</div>
             </div>
           </div>
           
@@ -284,7 +325,22 @@ const DashboardPage = () => {
             <span className="w-2 h-2 bg-green-500 rounded-full mr-2 sm:mr-3 animate-pulse flex-shrink-0"></span>
             <span className="break-words">[RECENT_ANALYSES.LOG]</span>
           </h2>
-          
+          <div>
+  {allSingleAnalysis.map((item,index) => (
+    <div
+      key={index}
+      className="p-2 border rounded mb-2 hover:bg-gray-900"
+    >
+      <p>
+        {item?.summary?.split("\n").slice(0, 3).join("\n")}
+      </p>
+      <p className="text-sm text-gray-500">{item?.analysis_timestamp}</p>
+    </div>
+  ))}
+</div>
+
+
+          {/*}
           <div className="space-y-2 sm:space-y-3">
             {recentAnalyses.map((analysis) => (
               <div key={analysis.id} className="flex flex-col sm:flex-row sm:items-center justify-between p-3 sm:p-4 bg-black/50 border border-gray-700/30 hover:border-cyan-500/30 transition-colors font-mono gap-3 sm:gap-0">
@@ -307,10 +363,10 @@ const DashboardPage = () => {
                     [{analysis.techniques}_TECH]
                   </span>
                   <span className={`px-2 sm:px-3 py-1 text-xs font-medium border ${getSeverityColor(analysis.severity)} whitespace-nowrap`}>
-                    {analysis.severity.toUpperCase()}
+                    {analysis.severity?.toUpperCase()}
                   </span>
                   <span className="text-green-400 whitespace-nowrap">
-                    [{analysis.status.toUpperCase()}]
+                    [{analysis?.status?.toUpperCase()}]
                   </span>
                   {analysis.hasVisualization && (
                     <Link href="/dashboard/visualization" className="px-2 py-1 bg-purple-900/30 border border-purple-500/30 hover:border-purple-400 hover:bg-purple-500/20 text-purple-400 hover:text-purple-300 transition-colors text-xs whitespace-nowrap">
@@ -321,7 +377,7 @@ const DashboardPage = () => {
               </div>
             ))}
           </div>
-          
+          */}
           <div className="mt-4 sm:mt-6 text-center">
             <Link href="/dashboard/analysis" className="inline-flex items-center px-4 sm:px-6 py-2 sm:py-3 bg-black border-2 border-green-500 hover:border-cyan-400 text-green-400 hover:text-cyan-400 font-medium transition-all duration-300 hover:shadow-[0_0_20px_rgba(0,255,150,0.5)] font-mono text-sm">
               <span className="hidden sm:inline">&gt; NEW_ANALYSIS.EXE --EXECUTE</span>
@@ -329,6 +385,8 @@ const DashboardPage = () => {
             </Link>
           </div>
         </div>
+
+        
 
         {/* Floating ASCII elements - hidden on mobile for cleaner look */}
         <div className="hidden md:block absolute top-32 left-10 text-green-500/20 font-mono text-xs animate-pulse">
@@ -372,4 +430,4 @@ const DashboardPage = () => {
   )
 }
 
-export default DashboardPage
+export default DashboardPage 

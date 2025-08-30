@@ -1,7 +1,6 @@
 from fastapi import APIRouter, HTTPException, Depends
 from typing import Dict, Any, List
-import time
-
+import time, re
 from pydantic import BaseModel
 from model.logs_model import LogAnalysisRequest, LogAnalysisResponse, AttackTechnique
 from model.analysis_model import AnalysisHistoryItem, UserAnalyticsStats

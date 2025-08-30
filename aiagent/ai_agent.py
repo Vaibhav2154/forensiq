@@ -1,6 +1,9 @@
 """
 AI Agent Module for ForensIQ CLI Tool
+"""
+__version__ = "1.0.0"
 
+"""
 This module provides intelligent automation features for log analysis including:
 - Intelligent log parsing and preprocessing
 - Context-aware analysis scheduling
