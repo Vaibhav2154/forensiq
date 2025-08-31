@@ -404,7 +404,7 @@ const recentSingleAnalyses  = async(elementId:string)=>{
               <div>
                 <p className="text-green-400 text-xs">[TOTAL_ANALYSES]</p>
                 <p className="text-xl sm:text-2xl font-bold text-cyan-400">
-                  {loading ? '...' : recentAnalyses.length}
+                  {recentAnalyses.length}
                 </p>
               </div>
               <div className="text-cyan-400 text-lg sm:text-xl">📈</div>
@@ -416,7 +416,7 @@ const recentSingleAnalyses  = async(elementId:string)=>{
               <div>
                 <p className="text-green-400 text-xs">[MITRE_TECHNIQUES]</p>
                 <p className="text-xl sm:text-2xl font-bold text-green-400">
-                  {loading ? '...' : totalTechniques}
+                  {totalTechniques}
                 </p>
               </div>
               <div className="text-green-400 text-lg sm:text-xl">🛡️</div>

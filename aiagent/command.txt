@@ -1,0 +1,8 @@
+python cli_tool.py auth login --username vaibhav
+python cli_tool.py auth register --username vaibhav --email vaibhav@example.com
+
+
+python cli_tool.py profile setup-dynamic --list-sources
+
+
+python cli_tool.py monitor --dynamic --interval 300

@@ -1,6 +1,6 @@
 'use client'
 import React, { useState, useEffect } from 'react';
-import { ChevronDown, ChevronRight, Copy, CheckCircle, Terminal, FileText, Play, Settings, Eye, Download, Power, ArrowDown, ArrowRight } from 'lucide-react';
+import { ChevronDown, ChevronRight, Copy, CheckCircle, Terminal, FileText, Play, Settings, Eye, Download, Power, ArrowDown, ArrowRight, Brain, User } from 'lucide-react';
 
 interface Step {
   id: number;
@@ -27,7 +27,7 @@ const StepGuide: React.FC = () => {
     const checkMobile = () => {
       setIsMobile(window.innerWidth < 768);
     };
-    
+
     checkMobile();
     window.addEventListener('resize', checkMobile);
     setIsVisible(true);
@@ -37,173 +37,172 @@ const StepGuide: React.FC = () => {
     };
   }, []);
 
+
   const steps: Step[] = [
-    {
-      id: 1,
-      title: 'PREPARE_LOGS.SYS',
-      shortTitle: 'PREPARE_LOGS',
-      description: 'Collect and format your log files for analysis',
-      shortDescription: 'Collect & format logs',
-      commands: [
-        'mkdir /logs/collection',
-        'cp /var/log/auth.log /logs/collection/',
-        'cp /var/log/system.log /logs/collection/'
-      ],
-      example: `timestamp,ip,user,action,status
-2025-08-29 10:22:01,192.168.1.10,admin,login,FAIL
-2025-08-29 10:23:05,192.168.1.15,user1,login,SUCCESS`,
-      tips: [
-        'Ensure logs are in readable format (CSV, JSON, or standard syslog)',
-        'Organize logs by date for easier analysis',
-        'Check file permissions before analysis'
-      ],
-      status: currentStep >= 1 ? 'completed' : 'pending',
-      icon: <FileText className="w-5 h-5" />,
-      color: 'cyan'
-    },
-    {
-      id: 2,
-      title: 'INIT_TERMINAL.ENV',
-      shortTitle: 'INIT_TERMINAL',
-      description: 'Open terminal and navigate to analyzer directory',
-      shortDescription: 'Open terminal & navigate',
-      commands: [
-        'cd /path/to/cyber_analyzer',
-        'ls -la',
-        'chmod +x cyber_analyzer.py'
-      ],
-      example: `admin@forensiq:~$ cd /opt/cyber_analyzer
-admin@forensiq:/opt/cyber_analyzer$ ls -la
--rwxr-xr-x 1 admin admin 12.5K cyber_analyzer.py`,
-      tips: [
-        'Windows: Win + R → cmd → Enter',
-        'Mac: Cmd + Space → Terminal → Enter', 
-        'Linux: Open terminal emulator'
-      ],
-      status: currentStep >= 2 ? 'completed' : currentStep === 2 ? 'current' : 'pending',
-      icon: <Terminal className="w-5 h-5" />,
-      color: 'green'
-    },
-    {
-      id: 3,
-      title: 'EXECUTE_ANALYSIS.BIN',
-      shortTitle: 'EXECUTE_ANALYSIS',
-      description: 'Run the cyber analyzer on your log files',
-      shortDescription: 'Run cyber analyzer',
-      commands: [
-        'python cyber_analyzer.py /logs/collection/auth.log',
-        'python cyber_analyzer.py --format=json /logs/network.json',
-        'python cyber_analyzer.py --real-time /logs/live/'
-      ],
-      example: `[ANALYSIS_STARTED] Processing auth.log...
-[MITRE_MAPPING] Detecting attack techniques...
-[THREAT_SCORE] Calculated risk levels...
-[ANALYSIS_COMPLETE] 23 threats detected`,
-      tips: [
-        'Use --format flag for non-CSV files',
-        'Add --verbose for detailed output',
-        'Use --real-time for live monitoring'
-      ],
-      status: currentStep >= 3 ? 'completed' : currentStep === 3 ? 'current' : 'pending',
-      icon: <Play className="w-5 h-5" />,
-      color: 'purple'
-    },
-    {
-      id: 4,
-      title: 'VIEW_RESULTS.OUT',
-      shortTitle: 'VIEW_RESULTS',
-      description: 'Review analysis summary and threat indicators',
-      shortDescription: 'Review analysis summary',
-      example: `┌─────────────────┬────────────┬──────────────┐
-│ IP_ADDRESS      │ FAIL_COUNT │ THREAT_LEVEL │
-├─────────────────┼────────────┼──────────────┤
-│ 192.168.1.10    │ 15         │ CRITICAL     │
-│ 10.0.0.25       │ 8          │ HIGH         │
-│ 172.16.0.100    │ 3          │ MEDIUM       │
-└─────────────────┴────────────┴──────────────┘`,
-      tips: [
-        'Critical threats require immediate attention',
-        'High threats should be investigated within 1 hour',
-        'Monitor medium threats for escalation'
-      ],
-      status: currentStep >= 4 ? 'completed' : currentStep === 4 ? 'current' : 'pending',
-      icon: <Eye className="w-5 h-5" />,
-      color: 'yellow'
-    },
-    {
-      id: 5,
-      title: 'CONFIG_ALERTS.CFG',
-      shortTitle: 'CONFIG_ALERTS',
-      description: 'Configure alert thresholds and monitoring settings',
-      shortDescription: 'Configure alerts & monitoring',
-      commands: [
-        'nano cyber_analyzer.conf',
-        'python cyber_analyzer.py --config-test',
-        'python cyber_analyzer.py --set-threshold 5'
-      ],
-      example: `[ALERT_CONFIG]
-FAIL_LOGIN_THRESHOLD=3
-BRUTE_FORCE_WINDOW=300
-SUSPICIOUS_IP_WHITELIST=192.168.1.0/24
-EMAIL_ALERTS=admin@company.com`,
-      tips: [
-        'Set appropriate thresholds based on your environment',
-        'Configure email notifications for critical alerts',
-        'Test configuration before deploying to production'
-      ],
-      status: currentStep >= 5 ? 'completed' : currentStep === 5 ? 'current' : 'pending',
-      icon: <Settings className="w-5 h-5" />,
-      color: 'orange'
-    },
-    {
-      id: 6,
-      title: 'REAL_TIME_MONITOR.DAEMON',
-      shortTitle: 'REAL_TIME_MONITOR',
-      description: 'Enable continuous monitoring and live threat detection',
-      shortDescription: 'Enable live monitoring',
-      commands: [
-        'python cyber_analyzer_watch.py /logs/live/',
-        'nohup python cyber_analyzer_watch.py /logs/ &',
-        'systemctl enable cyber-analyzer'
-      ],
-      example: `[MONITOR_ACTIVE] Watching /logs/live/ for changes...
-[ALERT] 192.168.1.10 has 5 failed logins! 🚨
-[ALERT] Brute force detected from 203.0.113.45! 🚨
-[INFO] Analysis complete. 2 threats detected.`,
-      tips: [
-        'Use nohup for background monitoring',
-        'Monitor system resources during real-time analysis',
-        'Set up log rotation to prevent disk space issues'
-      ],
-      status: currentStep >= 6 ? 'completed' : currentStep === 6 ? 'current' : 'pending',
-      icon: <Power className="w-5 h-5" />,
-      color: 'red'
-    },
-    {
-      id: 7,
-      title: 'EXPORT_REPORTS.CSV',
-      shortTitle: 'EXPORT_REPORTS',
-      description: 'Generate and export comprehensive analysis reports',
-      shortDescription: 'Generate & export reports',
-      commands: [
-        'python cyber_analyzer.py /logs/auth.log --export summary.csv',
-        'python cyber_analyzer.py --export-format json --output report.json',
-        'python cyber_analyzer.py --pdf-report incident_report.pdf'
-      ],
-      example: `[EXPORT_STARTED] Generating CSV report...
-[MITRE_MAPPING] Including technique mappings...
-[TIMELINE] Building attack timeline...
-[SUCCESS] Report saved: /reports/security_analysis_2025-08-29.csv`,
-      tips: [
-        'Export reports for compliance and documentation',
-        'Include MITRE ATT&CK mappings in reports',
-        'Archive reports for historical analysis'
-      ],
-      status: currentStep >= 7 ? 'completed' : currentStep === 7 ? 'current' : 'pending',
-      icon: <Download className="w-5 h-5" />,
-      color: 'green'
-    }
-  ];
+  {
+    id: 1,
+    title: 'START_SERVER.SYS',
+    shortTitle: 'START_SERVER',
+    description: 'Start your ForensIQ FastAPI server',
+    shortDescription: 'Run ForensIQ server',
+    commands: [
+      'cd d:\\forensiq\\server',
+      'python main.py'
+    ],
+    example: `PS D:\\forensiq\\server> python main.py
+INFO:     Uvicorn running on http://localhost:8000 (Press CTRL+C to quit)`,
+    tips: [
+      'Ensure MongoDB is already running',
+      'Check firewall allows access on port 8000',
+      'Use CTRL+C to stop the server'
+    ],
+    status: currentStep >= 1 ? 'completed' : currentStep === 1 ? 'current' : 'pending',
+    icon: <Power className="w-5 h-5" />,
+    color: 'red'
+  },
+  {
+    id: 2,
+    title: 'AUTHENTICATE.USER',
+    shortTitle: 'AUTHENTICATE',
+    description: 'Login or register using the CLI tool',
+    shortDescription: 'Login/Register via CLI',
+    commands: [
+      'cd d:\\forensiq\\aiagent',
+      'python cli_tool.py auth login --username vaibhav',
+      'python cli_tool.py auth register --username vaibhav --email vaibhav@example.com'
+    ],
+    example: `[AUTH] Login successful for user vaibhav
+[AUTH] Token stored locally`,
+    tips: [
+      'Use your registered username',
+      'Clear saved credentials if login fails',
+      'Run with --api-url if server not on localhost'
+    ],
+    status: currentStep >= 2 ? 'completed' : currentStep === 2 ? 'current' : 'pending',
+    icon: <User className="w-5 h-5" />,
+    color: 'blue'
+  },
+  {
+    id: 3,
+    title: 'LIST_SOURCES.LOG',
+    shortTitle: 'LIST_SOURCES',
+    description: 'Check available dynamic log sources on your system',
+    shortDescription: 'View log sources',
+    commands: [
+      'python cli_tool.py profile setup-dynamic --list-sources'
+    ],
+    example: `Available Sources:
+- security_events
+- system_events
+- application_events
+- powershell_logs
+- process_monitor
+- network_connections
+- file_system_activity`,
+    tips: [
+      'Some sources require Administrator privileges',
+      'Choose sources based on security requirements',
+      'Avoid enabling too many sources initially'
+    ],
+    status: currentStep >= 3 ? 'completed' : currentStep === 3 ? 'current' : 'pending',
+    icon: <FileText className="w-5 h-5" />,
+    color: 'cyan'
+  },
+  {
+    id: 4,
+    title: 'SETUP_PROFILE.CFG',
+    shortTitle: 'SETUP_PROFILE',
+    description: 'Setup dynamic monitoring profile with sources and interval',
+    shortDescription: 'Setup monitoring profile',
+    commands: [
+      'python cli_tool.py profile setup-dynamic --sources security_events,system_events,process_monitor --interval 300 --enable-ai-agent --auto-enhance'
+    ],
+    example: `[PROFILE] Dynamic profile created
+Sources: security_events, system_events, process_monitor
+Interval: 300 seconds
+AI Agent: enabled`,
+    tips: [
+      'Use 300 seconds (5 min) for normal monitoring',
+      'Use 120 seconds (2 min) for high-security monitoring',
+      'Enable AI agent for automatic analysis'
+    ],
+    status: currentStep >= 4 ? 'completed' : currentStep === 4 ? 'current' : 'pending',
+    icon: <Settings className="w-5 h-5" />,
+    color: 'orange'
+  },
+  {
+    id: 5,
+    title: 'START_MONITOR.DAEMON',
+    shortTitle: 'START_MONITOR',
+    description: 'Start automated monitoring session',
+    shortDescription: 'Begin monitoring',
+    commands: [
+      'python cli_tool.py monitor --start-dynamic',
+      'python cli_tool.py monitor --start-dynamic --session-id security_monitoring_1'
+    ],
+    example: `[MONITOR] Started monitoring session security_monitoring_1
+Interval: 300s
+Log sources: security_events, system_events, process_monitor`,
+    tips: [
+      'Use --session-id to track specific sessions',
+      'Keep one terminal running for continuous monitoring',
+      'Results stored automatically in MongoDB'
+    ],
+    status: currentStep >= 5 ? 'completed' : currentStep === 5 ? 'current' : 'pending',
+    icon: <Play className="w-5 h-5" />,
+    color: 'purple'
+  },
+  {
+    id: 6,
+    title: 'VIEW_RESULTS.OUT',
+    shortTitle: 'VIEW_RESULTS',
+    description: 'Check monitoring status and recent AI analysis results',
+    shortDescription: 'View results & status',
+    commands: [
+      'python cli_tool.py monitor --status',
+      'python cli_tool.py profile status',
+      'python cli_tool.py monitor --show-results --limit 5',
+      'python cli_tool.py monitor --export-results --output monitoring_results.json'
+    ],
+    example: `[RESULTS] Showing last 5 analyses...
+Threat Level: MEDIUM
+Techniques: T1078 (Valid Accounts)
+Recommendations: Monitor failed logins, Review process execution`,
+    tips: [
+      'Use --limit N to control number of results shown',
+      'Export results for compliance or offline analysis',
+      'Results also available in MongoDB collections'
+    ],
+    status: currentStep >= 6 ? 'completed' : currentStep === 6 ? 'current' : 'pending',
+    icon: <Eye className="w-5 h-5" />,
+    color: 'yellow'
+  },
+  {
+    id: 7,
+    title: 'CONFIG_AI.CFG',
+    shortTitle: 'CONFIG_AI',
+    description: 'Tune AI agent for high-security environments',
+    shortDescription: 'Configure AI agent',
+    commands: [
+      'python cli_tool.py agent status',
+      'python cli_tool.py agent configure --learning-threshold 3 --high-threat-interval 60',
+      'python cli_tool.py profile update --interval 120'
+    ],
+    example: `[AI_AGENT] Status: active
+Learning threshold: 3
+High-threat interval: 60 seconds`,
+    tips: [
+      'Lower thresholds for more aggressive detection',
+      'Shorten intervals for high-risk systems',
+      'Balance security with system performance'
+    ],
+    status: currentStep >= 7 ? 'completed' : currentStep === 7 ? 'current' : 'pending',
+    icon: <Brain className="w-5 h-5" />,
+    color: 'green'
+  }
+];
+
+
 
   const toggleStep = (stepId: number) => {
     const newExpanded = new Set(expandedSteps);
@@ -261,7 +260,7 @@ EMAIL_ALERTS=admin@company.com`,
   return (
     <div className="relative bg-black min-h-screen text-white">
       {/* Grid overlay */}
-      <div 
+      <div
         className="absolute inset-0 opacity-5"
         style={{
           backgroundImage: `
@@ -273,17 +272,32 @@ EMAIL_ALERTS=admin@company.com`,
       />
 
       <div className="relative container mx-auto px-4 sm:px-6 py-6 sm:py-8 max-w-4xl">
+        {/* AI Agent Info Panel */}
+        <div className="mb-6">
+          <div className="bg-cyan-900/80 border border-cyan-400/40 rounded-lg p-4 sm:p-6 shadow-lg">
+            <h2 className="text-lg sm:text-xl font-bold text-cyan-300 mb-2 font-mono flex items-center">
+              <Settings className="w-5 h-5 mr-2 text-cyan-400" />
+              AI Agent Integration in ForensIQ CLI
+            </h2>
+            <ul className="list-disc pl-5 text-gray-200 text-sm sm:text-base space-y-1">
+              <li>The AI agent is <span className="text-cyan-300 font-bold">automatically initialized</span> and managed by the CLI tool (<span className="text-green-300 font-mono">cli_tool.py</span>). You do <span className="text-cyan-300 font-bold">not</span> interact with it directly.</li>
+              <li>All advanced analysis and agent management is performed via CLI commands: <span className="text-green-300 font-mono">analyze --enhanced</span>, <span className="text-green-300 font-mono">analyze --ai-agent</span>, <span className="text-green-300 font-mono">agent status</span>, <span className="text-green-300 font-mono">agent configure</span>.</li>
+              <li>The agent's state and learning data are stored and handled by the CLI tool in your <span className="text-green-300 font-mono">~/.forensiq</span> directory (<span className="text-green-300 font-mono">ai_agent_state.json</span>).</li>
+              <li>For complete documentation, see the <span className="text-green-300 font-mono">CLI_USER_GUIDE.md</span> or use <span className="text-green-300 font-mono">python cli_tool.py --help</span> and <span className="text-green-300 font-mono">python cli_tool.py agent --help</span>.</li>
+            </ul>
+          </div>
+        </div>
         {/* Header */}
         <div className={`mb-8 sm:mb-12 transform transition-all duration-1000 ${isVisible ? 'translate-y-0 opacity-100' : '-translate-y-10 opacity-0'}`}>
           <div className="bg-black/80 backdrop-blur-sm border border-green-500/30 rounded-lg p-4 sm:p-6 mb-6">
             <h1 className="text-2xl sm:text-3xl md:text-4xl font-bold text-green-400 mb-4 tracking-wider font-mono">
-              [CYBER_ANALYZER_CLI.GUIDE]
+              [FORENSIQ_CLI.GUIDE]
             </h1>
             <div className="text-cyan-400 text-sm sm:text-base font-mono">
               &gt; STEP_BY_STEP_EXECUTION_PROTOCOL --MODE=INTERACTIVE
             </div>
             <p className="text-gray-300 mt-4 text-sm sm:text-base">
-              Follow this linked process chain to deploy the CLI-based automatic log analyzer for cyber threat detection.
+              Follow this linked process chain to deploy the ForensIQ CLI tool with AI agent integration for automated cyber threat detection.
             </p>
           </div>
 
@@ -295,27 +309,25 @@ EMAIL_ALERTS=admin@company.com`,
                 [EXECUTION_PROGRESS]
               </h3>
               <span className="text-cyan-400 text-sm font-mono">
-                {currentStep}/7 STEPS_COMPLETE
+                {currentStep}/8 STEPS_COMPLETE
               </span>
             </div>
-            
+
             <div className="flex items-center space-x-2 overflow-x-auto pb-2">
               {steps.map((step, index) => (
                 <React.Fragment key={step.id}>
-                  <div 
-                    className={`flex-shrink-0 w-8 h-8 sm:w-10 sm:h-10 rounded-full border-2 flex items-center justify-center cursor-pointer transition-all duration-300 font-mono ${
-                      step.status === 'completed' ? 'border-green-400 bg-green-400/20 text-green-400 shadow-[0_0_10px_rgba(34,197,94,0.5)]' :
-                      step.status === 'current' ? 'border-cyan-400 bg-cyan-400/20 text-cyan-400 animate-pulse shadow-[0_0_15px_rgba(6,182,212,0.8)]' :
-                      'border-gray-600 bg-gray-600/10 text-gray-600'
-                    }`}
+                  <div
+                    className={`flex-shrink-0 w-8 h-8 sm:w-10 sm:h-10 rounded-full border-2 flex items-center justify-center cursor-pointer transition-all duration-300 font-mono ${step.status === 'completed' ? 'border-green-400 bg-green-400/20 text-green-400 shadow-[0_0_10px_rgba(34,197,94,0.5)]' :
+                        step.status === 'current' ? 'border-cyan-400 bg-cyan-400/20 text-cyan-400 animate-pulse shadow-[0_0_15px_rgba(6,182,212,0.8)]' :
+                          'border-gray-600 bg-gray-600/10 text-gray-600'
+                      }`}
                     onClick={() => setCurrentStep(step.id)}
                   >
                     <span className="text-xs sm:text-sm font-bold">{step.id}</span>
                   </div>
                   {index < steps.length - 1 && (
-                    <div className={`flex-shrink-0 h-0.5 w-4 sm:w-8 transition-all duration-500 ${
-                      step.status === 'completed' ? 'bg-green-400 shadow-[0_0_5px_rgba(34,197,94,0.8)]' : 'bg-gray-600'
-                    }`} />
+                    <div className={`flex-shrink-0 h-0.5 w-4 sm:w-8 transition-all duration-500 ${step.status === 'completed' ? 'bg-green-400 shadow-[0_0_5px_rgba(34,197,94,0.8)]' : 'bg-gray-600'
+                      }`} />
                   )}
                 </React.Fragment>
               ))}
@@ -333,26 +345,23 @@ EMAIL_ALERTS=admin@company.com`,
                 <div className="flex items-center">
                   {/* Left Connection Point */}
                   <div className="hidden lg:flex flex-col items-center mr-6">
-                    <div className={`w-4 h-4 rounded-full border-2 ${
-                      step.status === 'completed' ? 'bg-green-400 border-green-400 shadow-[0_0_10px_rgba(34,197,94,0.8)]' :
-                      step.status === 'current' ? 'bg-cyan-400 border-cyan-400 animate-pulse shadow-[0_0_15px_rgba(6,182,212,1)]' :
-                      'bg-gray-600 border-gray-600'
-                    }`} />
+                    <div className={`w-4 h-4 rounded-full border-2 ${step.status === 'completed' ? 'bg-green-400 border-green-400 shadow-[0_0_10px_rgba(34,197,94,0.8)]' :
+                        step.status === 'current' ? 'bg-cyan-400 border-cyan-400 animate-pulse shadow-[0_0_15px_rgba(6,182,212,1)]' :
+                          'bg-gray-600 border-gray-600'
+                      }`} />
                     <div className="text-gray-500 text-xs font-mono mt-1">NODE_{step.id}</div>
                   </div>
 
                   {/* Step Container */}
-                  <div 
-                    className={`flex-1 bg-black/80 backdrop-blur-sm border rounded-2xl transition-all duration-500 transform font-mono ${
-                      step.status === 'current' ? 'scale-105 shadow-[0_0_30px_rgba(0,255,150,0.3)] animate-pulse' : 
-                      step.status === 'completed' ? 'shadow-[0_0_15px_rgba(34,197,94,0.2)]' : ''
-                    } ${getStepColor(step)} ${
-                      isVisible ? 'translate-x-0 opacity-100' : 'translate-x-10 opacity-0'
-                    }`}
+                  <div
+                    className={`flex-1 bg-black/80 backdrop-blur-sm border rounded-2xl transition-all duration-500 transform font-mono ${step.status === 'current' ? 'scale-105 shadow-[0_0_30px_rgba(0,255,150,0.3)] animate-pulse' :
+                        step.status === 'completed' ? 'shadow-[0_0_15px_rgba(34,197,94,0.2)]' : ''
+                      } ${getStepColor(step)} ${isVisible ? 'translate-x-0 opacity-100' : 'translate-x-10 opacity-0'
+                      }`}
                     style={{ transitionDelay: `${index * 150}ms` }}
                   >
                     {/* Step Header */}
-                    <div 
+                    <div
                       className="flex items-center justify-between p-4 sm:p-6 cursor-pointer"
                       onClick={() => toggleStep(step.id)}
                     >
@@ -361,12 +370,12 @@ EMAIL_ALERTS=admin@company.com`,
                         <div className="lg:hidden flex-shrink-0">
                           {getStatusIndicator(step.status)}
                         </div>
-                        
+
                         {/* Icon */}
                         <div className={`w-10 h-10 sm:w-12 sm:h-12 rounded-lg ${getStepColor(step)} flex items-center justify-center flex-shrink-0 shadow-inner`}>
                           {step.icon}
                         </div>
-                        
+
                         {/* Content */}
                         <div className="min-w-0 flex-1">
                           <h3 className="text-base sm:text-lg font-semibold text-green-400 mb-1 break-words">
@@ -379,7 +388,7 @@ EMAIL_ALERTS=admin@company.com`,
                           </p>
                         </div>
                       </div>
-                      
+
                       {/* Expand/Collapse */}
                       <div className="flex-shrink-0 ml-2">
                         {expandedSteps.has(step.id) ? (
@@ -457,7 +466,7 @@ EMAIL_ALERTS=admin@company.com`,
 
                         {/* Action Buttons */}
                         <div className="flex flex-col sm:flex-row gap-3 sm:gap-4">
-                          {step.id < 7 && (
+                          {step.id < 8 && (
                             <button
                               onClick={() => {
                                 setCurrentStep(step.id + 1);
@@ -469,8 +478,8 @@ EMAIL_ALERTS=admin@company.com`,
                               <span className="sm:hidden">&gt;&gt; NEXT_STEP</span>
                             </button>
                           )}
-                          
-                          {step.id === 7 && (
+
+                          {step.id === 8 && (
                             <button
                               onClick={() => {
                                 setCurrentStep(1);
@@ -490,11 +499,10 @@ EMAIL_ALERTS=admin@company.com`,
                   {/* Right Connection Point (Desktop) */}
                   <div className="hidden lg:flex flex-col items-center ml-6">
                     <div className="text-gray-500 text-xs font-mono mb-1">PTR_{step.id}</div>
-                    <ArrowRight className={`w-5 h-5 ${
-                      step.status === 'completed' ? 'text-green-400' :
-                      step.status === 'current' ? 'text-cyan-400 animate-pulse' :
-                      'text-gray-600'
-                    }`} />
+                    <ArrowRight className={`w-5 h-5 ${step.status === 'completed' ? 'text-green-400' :
+                        step.status === 'current' ? 'text-cyan-400 animate-pulse' :
+                          'text-gray-600'
+                      }`} />
                   </div>
                 </div>
 
@@ -503,19 +511,18 @@ EMAIL_ALERTS=admin@company.com`,
                   <div className="flex justify-center my-4 sm:my-6">
                     <div className="flex flex-col items-center">
                       {/* Vertical connecting line */}
-                      <div className={`w-1 h-8 sm:h-12 transition-all duration-500 ${getConnectorClass(index)}`} 
-                           style={{ 
-                             boxShadow: step.status !== 'pending' ? '0 0 10px rgba(34, 197, 94, 0.5)' : 'none' 
-                           }} 
+                      <div className={`w-1 h-8 sm:h-12 transition-all duration-500 ${getConnectorClass(index)}`}
+                        style={{
+                          boxShadow: step.status !== 'pending' ? '0 0 10px rgba(34, 197, 94, 0.5)' : 'none'
+                        }}
                       />
-                      
+
                       {/* Connecting arrow */}
-                      <ArrowDown className={`w-4 h-4 mt-1 transition-all duration-500 ${
-                        step.status === 'completed' ? 'text-green-400' :
-                        step.status === 'current' ? 'text-cyan-400 animate-bounce' :
-                        'text-gray-600'
-                      }`} />
-                      
+                      <ArrowDown className={`w-4 h-4 mt-1 transition-all duration-500 ${step.status === 'completed' ? 'text-green-400' :
+                          step.status === 'current' ? 'text-cyan-400 animate-bounce' :
+                            'text-gray-600'
+                        }`} />
+
                       {/* Connection label */}
                       <div className="text-xs text-gray-500 mt-1 font-mono hidden sm:block">
                         LINK_TO_STEP_{step.id + 1}
@@ -532,7 +539,7 @@ EMAIL_ALERTS=admin@company.com`,
         <div className={`mt-8 sm:mt-12 bg-black/80 backdrop-blur-sm border border-green-500/30 rounded-lg p-4 sm:p-6 transform transition-all duration-1000 delay-1000 ${isVisible ? 'translate-y-0 opacity-100' : 'translate-y-10 opacity-0'} font-mono`}>
           <div className="flex items-center justify-between">
             <div className="text-green-400 text-sm sm:text-base">
-              [SYSTEM_STATUS] &gt; ANALYZER_READY_FOR_DEPLOYMENT
+              [SYSTEM_STATUS] &gt; FORENSIQ_CLI_READY_FOR_DEPLOYMENT
             </div>
             <div className="flex items-center space-x-2 text-xs sm:text-sm">
               <div className="w-2 h-2 bg-green-500 rounded-full animate-pulse shadow-[0_0_5px_rgba(34,197,94,1)]" />
@@ -547,10 +554,10 @@ EMAIL_ALERTS=admin@company.com`,
         {`┌─────────────────┐
 │ LINKED_LIST.DAT │
 │ STATUS: ACTIVE  │
-│ NODES: 7        │
+│ NODES: 8        │
 └─────────────────┘`}
       </div>
-      
+
       <div className="hidden lg:block absolute bottom-32 left-10 text-green-500/10 font-mono text-xs animate-pulse delay-1000">
         {`> ./traverse_steps.py --direction=forward`}
       </div>
