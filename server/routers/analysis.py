@@ -1,13 +1,14 @@
 from fastapi import APIRouter, HTTPException, Depends
-from typing import Dict, Any, List
-from datetime import datetime, timezone
-import hashlib
+from typing import Dict, Any, List, Optional
 import time
-import uuid
-from contracts import BatchIngestRequest, EvidenceReference, RawLogRecord
 from model.logs_model import LogAnalysisRequest, LogAnalysisResponse, AttackTechnique
 from model.analysis_model import AnalysisHistoryItem, UserAnalyticsStats
 from services import GeminiService
+from services.investigation import (
+    EnrichedKnowledgeItem,
+    InvestigationService,
+    build_batch_from_raw_logs,
+)
 from services.knowledge import KnowledgeSearchQuery, KnowledgeService
 from services.analysis_storage_service import analysis_storage_service
 from routers.auth import get_current_user
@@ -16,50 +17,21 @@ from core import logger
 router = APIRouter(prefix="/api/v1", tags=["Log Analysis"])
 
 # Global service instances (will be initialized in main app)
-gemini_service: GeminiService = None
-knowledge_service: KnowledgeService = None
+gemini_service: Optional[GeminiService] = None
+knowledge_service: Optional[KnowledgeService] = None
+investigation_service: Optional[InvestigationService] = None
 
-def set_services(gemini: GeminiService, knowledge: KnowledgeService):
+
+def set_services(
+    gemini: Optional[GeminiService],
+    knowledge: Optional[KnowledgeService],
+    investigation: Optional[InvestigationService] = None,
+):
     """Set service instances for the router."""
-    global gemini_service, knowledge_service
+    global gemini_service, knowledge_service, investigation_service
     gemini_service = gemini
     knowledge_service = knowledge
-
-
-def _build_batch_from_raw_logs(raw_logs: str, username: str) -> BatchIngestRequest:
-    """Wrap raw log text into a traceable BatchIngestRequest for KCP normalization."""
-    now = datetime.now(timezone.utc)
-    batch_id = f"batch-{uuid.uuid4().hex[:12]}"
-    raw_lines = [line for line in raw_logs.splitlines() if line.strip()]
-    if not raw_lines:
-        raw_lines = [raw_logs.strip() or "(empty)"]
-
-    records: list[RawLogRecord] = []
-    for idx, line in enumerate(raw_lines, start=1):
-        line_hash = hashlib.sha256(line.encode("utf-8")).hexdigest()
-        records.append(
-            RawLogRecord(
-                record_id=f"raw-{batch_id}-{idx:04d}",
-                observed_at=now,
-                message=line,
-                source_type="api-analyze",
-                evidence_ref=EvidenceReference(
-                    reference_id=f"ev-{batch_id}-{idx:04d}",
-                    uri=f"api://analyze/{username}/{batch_id}",
-                    line_start=idx,
-                    line_end=idx,
-                    sha256=line_hash,
-                ),
-                metadata={"submitted_by": username},
-            )
-        )
-
-    return BatchIngestRequest(
-        batch_id=batch_id,
-        source=f"api:{username}",
-        records=records,
-        sent_at=now,
-    )
+    investigation_service = investigation
 
 
 def _hit_to_technique_dict(hit) -> Dict[str, Any]:
@@ -84,127 +56,129 @@ def _hit_to_technique_dict(hit) -> Dict[str, Any]:
     }
 
 
+def _enriched_item_to_technique(item: EnrichedKnowledgeItem) -> AttackTechnique:
+    """Convert a verified OKF MITRE ATT&CK EnrichedKnowledgeItem to AttackTechnique."""
+    return AttackTechnique(
+        technique_id=item.source_id,
+        name=item.name or item.source_id,
+        description=item.description_excerpt or item.relevance_rationale or "",
+        kill_chain_phases=[str(t) for t in item.tactics],
+        platforms=[str(p) for p in item.platforms],
+        relevance_score=round(max(0.0, min(1.0, float(item.relevance_score))), 4),
+    )
+
+
 @router.post("/analyze", response_model=LogAnalysisResponse)
 async def analyze_logs(request: LogAnalysisRequest, current_user: dict = Depends(get_current_user)) -> LogAnalysisResponse:
     """
-    Analyze system logs through KCP normalization, OKF/Cognee knowledge retrieval, and Gemini AI.
-    
+    Analyze system logs through KCP normalization, OKF/Cognee knowledge retrieval,
+    and the LangGraph multi-agent investigation workflow.
+
     This endpoint:
-    1. Runs raw logs through KCP to produce traceable NormalizedEvent records
-    2. Uses Gemini AI to summarize the provided logs and extract a focused search query
-    3. Queries the OKF/Cognee knowledge store for matching MITRE ATT&CK techniques
-    4. Optionally enhances the analysis with additional AI insights
+    1. Wraps raw logs into a traceable BatchIngestRequest (preserving timestamps, hosts, and SHA-256 hashes)
+    2. Normalizes logs via KCP into NormalizedEvent records and retrieves OKF/Cognee ATT&CK & CVE context
+    3. Runs the LangGraph multi-agent investigation workflow (when enhance_with_ai=True) using Gemini sub-agents
+    4. Returns both backward-compatible LogAnalysisResponse fields and the structured InvestigationResult
     """
     start_time = time.time()
-    
+
     try:
-        if not gemini_service or not knowledge_service:
+        if not knowledge_service:
             raise HTTPException(
                 status_code=503,
-                detail="Services not properly initialized"
+                detail="Knowledge service not properly initialized",
             )
-        
+
+        username = current_user.get("username", "anonymous")
+        max_results = request.max_results or 5
         logger.info(f"Starting log analysis for {len(request.logs)} characters of logs")
 
-        # Step 1: Normalize logs through KCP (preserving raw evidence references)
-        batch_request = _build_batch_from_raw_logs(
-            request.logs, current_user.get("username", "anonymous")
-        )
-        normalized_events = knowledge_service.normalize_batch(batch_request)
-        logger.info(
-            f"KCP normalized {len(normalized_events)} event(s) for batch {batch_request.batch_id}"
-        )
+        if request.enhance_with_ai:
+            active_investigation = investigation_service or InvestigationService(
+                knowledge_service=knowledge_service
+            )
+            logger.info("Executing LangGraph multi-agent investigation workflow")
+            inv_result = await active_investigation.investigate_raw_logs(
+                raw_logs=request.logs,
+                username=username,
+                max_results=max_results,
+            )
 
-        # Step 2: Summarize logs with Gemini AI
-        logger.info("Generating log summary with Gemini AI")
-        summary = await gemini_service.summarize_logs(request.logs)
-        
-        if not summary:
-            logger.error("Failed to generate summary: empty response")
-            raise HTTPException(
-                status_code=500,
-                detail="Failed to generate log summary: empty response"
+            mitre_items = [
+                item
+                for item in inv_result.retrieved_knowledge
+                if item.source_type == "mitre_attack"
+            ][:max_results]
+            matched_techniques = [_enriched_item_to_technique(item) for item in mitre_items]
+            summary = inv_result.rendered_summary or inv_result.executive_summary
+            enhanced_analysis = inv_result.rendered_markdown_report
+            investigation_payload = inv_result.model_dump(mode="json")
+        else:
+            # Lightweight non-LLM path: KCP normalization + OKF/Cognee retrieval only
+            batch_request, _ = build_batch_from_raw_logs(request.logs, username)
+            normalized_events = knowledge_service.normalize_batch(batch_request)
+            query_terms = sorted(
+                {
+                    evt.event_type.replace("_", " ")
+                    for evt in normalized_events
+                    if evt.event_type != "system_log_event"
+                }
             )
-        
-        if summary.startswith("Error generating summary:"):
-            logger.error(f"Failed to generate summary: {summary}")
-            raise HTTPException(
-                status_code=500,
-                detail=f"Failed to generate log summary: {summary}"
+            search_query = " ".join(query_terms) if query_terms else request.logs[:300]
+            search_resp = await knowledge_service.search(
+                KnowledgeSearchQuery(
+                    query=search_query,
+                    source_type="mitre_attack",
+                    kind="technique",
+                    top_k=max_results,
+                    search_mode="auto",
+                )
             )
-        
-        # Step 3: Extract a focused search query enriched with KCP event signals
-        logger.info("Extracting focused search query from summary")
-        search_query = await gemini_service.extract_search_query(request.logs, summary)
-        kcp_event_types = sorted(
-            {
-                evt.event_type.replace("_", " ")
-                for evt in normalized_events
-                if evt.event_type != "system_log_event"
-            }
-        )
-        if kcp_event_types:
-            search_query = f"{search_query} {' '.join(kcp_event_types)}".strip()
-        logger.info(f"Search query extracted ({len(search_query)} chars)")
+            matched_techniques = [
+                AttackTechnique(**_hit_to_technique_dict(hit))
+                for hit in search_resp.hits
+            ]
+            summary = (
+                f"KCP normalized {len(normalized_events)} event(s) across "
+                f"{len({e.scope_key for e in normalized_events})} scope(s); "
+                f"retrieved {len(matched_techniques)} OKF/Cognee technique(s) (AI enhancement disabled)."
+            )
+            enhanced_analysis = None
+            investigation_payload = None
 
-        # Step 4: Search OKF/Cognee knowledge store for matching MITRE ATT&CK techniques
-        logger.info("Searching OKF/Cognee knowledge store for matching ATT&CK techniques")
-        search_resp = await knowledge_service.search(
-            KnowledgeSearchQuery(
-                query=search_query,
-                source_type="mitre_attack",
-                kind="technique",
-                top_k=request.max_results or 5,
-                search_mode="auto",
-            )
-        )
-        techniques_data = [_hit_to_technique_dict(hit) for hit in search_resp.hits]
-        
-        matched_techniques = [
-            AttackTechnique(**tech)
-            for tech in techniques_data
-        ]
-        
-        # Step 5: Enhanced analysis (if requested)
-        enhanced_analysis = None
-        if request.enhance_with_ai and matched_techniques:
-            logger.info("Generating enhanced threat analysis")
-            enhanced_analysis = await gemini_service.enhance_threat_analysis(
-                summary, techniques_data
-            )
-        
         processing_time = (time.time() - start_time) * 1000  # Convert to milliseconds
-        
+
         logger.info(f"Analysis completed in {processing_time:.2f}ms with {len(matched_techniques)} matches")
-        
+
         response = LogAnalysisResponse(
             summary=summary,
             matched_techniques=matched_techniques,
             enhanced_analysis=enhanced_analysis,
-            processing_time_ms=processing_time
+            investigation=investigation_payload,
+            processing_time_ms=processing_time,
         )
-        
+
         # Store the analysis result in encrypted format
         try:
             analysis_id = await analysis_storage_service.store_analysis_result(
                 user_id=current_user["username"],
                 request=request,
-                response=response
+                response=response,
             )
             logger.info(f"Stored analysis result with ID {analysis_id} for user {current_user['username']}")
         except Exception as e:
             logger.error(f"Failed to store analysis result: {str(e)}")
             # Continue without failing the request - storage is not critical for the response
-        
+
         return response
-        
+
     except HTTPException:
         raise
     except Exception as e:
         logger.error(f"Unexpected error in log analysis: {str(e)}")
         raise HTTPException(
             status_code=500,
-            detail=f"Internal server error: {str(e)}"
+            detail=f"Internal server error: {str(e)}",
         )
 
 

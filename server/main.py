@@ -7,31 +7,37 @@ from contextlib import asynccontextmanager
 from datetime import datetime
 from core import Config, logger
 from services import GeminiService
+from services.investigation import InvestigationService
 from services.knowledge import KnowledgeService
-from routers import auth, users, analysis_router, mitre, knowledge_router
+from routers import auth, users, analysis_router, mitre, knowledge_router, investigations_router
 from routers import monitoring
 from routers.analysis import set_services
+from routers.investigations import set_investigation_service
 from routers.mitre import set_mitre_services
 from routers.knowledge import set_knowledge_service
 from model import HealthCheck, ErrorResponse, DatabaseStats
 
 gemini_service: GeminiService = None
 knowledge_service: KnowledgeService = None
+investigation_service: InvestigationService = None
 
 @asynccontextmanager
 async def lifespan(app: FastAPI):
     """Manage application lifespan - startup and shutdown events."""
     logger.info("Starting ForensIQ API server...")
     try:
-        global gemini_service, knowledge_service
+        global gemini_service, knowledge_service, investigation_service
         logger.info("Initializing Gemini AI service...")
         gemini_service = GeminiService()
         logger.info("Initializing ForensIQ knowledge service (KCP/OKF/Cognee)...")
         knowledge_service = KnowledgeService()
         await knowledge_service.initialize()
+        logger.info("Initializing ForensIQ LangGraph multi-agent investigation service...")
+        investigation_service = InvestigationService(knowledge_service=knowledge_service)
         # Wire services into routers
         set_knowledge_service(knowledge_service)
-        set_services(gemini_service, knowledge_service)
+        set_investigation_service(investigation_service)
+        set_services(gemini_service, knowledge_service, investigation_service)
         set_mitre_services(knowledge_service, gemini_service)
         logger.info("All services initialized successfully")
     except Exception as e:
@@ -47,7 +53,7 @@ async def lifespan(app: FastAPI):
 
 app = FastAPI(
     title="ForensIQ - MITRE ATT&CK & CVE Log Analysis API",
-    description="AI-powered system log analysis with KCP normalization, OKF/Cognee knowledge retrieval, and Gemini AI",
+    description="AI-powered system log analysis with KCP normalization, OKF/Cognee knowledge retrieval, and LangGraph multi-agent investigation",
     version="1.0.0",
     docs_url="/docs",
     redoc_url="/redoc",
@@ -69,6 +75,7 @@ app.include_router(analysis_router)
 app.include_router(monitoring.router)
 app.include_router(mitre.router)
 app.include_router(knowledge_router)
+app.include_router(investigations_router)
 
 @app.get("/", response_model=dict)
 async def root():
@@ -92,6 +99,10 @@ async def health_check():
             services_status["gemini_ai"] = "healthy"
         else:
             services_status["gemini_ai"] = "not_initialized"
+        if investigation_service:
+            services_status["multi_agent_investigation"] = "healthy"
+        else:
+            services_status["multi_agent_investigation"] = "not_initialized"
         db_stats = None
         if knowledge_service:
             try:

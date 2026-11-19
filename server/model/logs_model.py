@@ -19,9 +19,10 @@ class AttackTechnique(BaseModel):
 
 class LogAnalysisResponse(BaseModel):
     """Response model for log analysis."""
-    summary: str = Field(..., description="AI-generated summary of the logs")
-    matched_techniques: List[AttackTechnique] = Field(default_factory=list, description="Matching MITRE ATT&CK techniques")
-    enhanced_analysis: Optional[str] = Field(None, description="Enhanced AI analysis with threat intelligence")
+    summary: str = Field(..., description="Structured summary of observed log events")
+    matched_techniques: List[AttackTechnique] = Field(default_factory=list, description="Verified MITRE ATT&CK techniques retrieved from OKF/Cognee")
+    enhanced_analysis: Optional[str] = Field(None, description="Evidence-backed multi-agent investigation report (Markdown)")
+    investigation: Optional[Dict[str, Any]] = Field(None, description="Structured LangGraph multi-agent InvestigationResult payload")
     analysis_timestamp: datetime = Field(default_factory=datetime.utcnow, description="When the analysis was performed")
     processing_time_ms: Optional[float] = Field(None, description="Processing time in milliseconds")
 

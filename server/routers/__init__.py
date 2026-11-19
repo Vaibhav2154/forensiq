@@ -5,15 +5,22 @@ from __future__ import annotations
 import importlib
 from typing import Any
 
-_LAZY_SUBMODULES = {"auth", "users", "analysis", "mitre", "monitoring", "knowledge"}
+_LAZY_SUBMODULES = {"auth", "users", "analysis", "mitre", "monitoring", "knowledge", "investigations"}
 _LAZY_ROUTERS = {
     "auth_router": ".auth",
     "users_router": ".users",
     "analysis_router": ".analysis",
     "knowledge_router": ".knowledge",
+    "investigations_router": ".investigations",
 }
 
-__all__ = ["auth_router", "users_router", "analysis_router", "knowledge_router"]
+__all__ = [
+    "auth_router",
+    "users_router",
+    "analysis_router",
+    "knowledge_router",
+    "investigations_router",
+]
 
 
 def __getattr__(name: str) -> Any:

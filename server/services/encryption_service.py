@@ -139,7 +139,8 @@ class EncryptionService:
                                summary: str,
                                techniques: list,
                                enhanced_analysis: Optional[str],
-                               hashed_password: str) -> Tuple[Dict[str, str], str]:
+                               hashed_password: str,
+                               investigation: Optional[Dict[str, Any]] = None) -> Tuple[Dict[str, str], str]:
         """
         Encrypt all analysis results using user's hashed password as key.
         
@@ -148,6 +149,7 @@ class EncryptionService:
             techniques: List of techniques
             enhanced_analysis: Optional enhanced analysis
             hashed_password: User's hashed password to use as encryption key
+            investigation: Optional structured multi-agent InvestigationResult dict
         
         Returns:
             Tuple of (encrypted_data_dict, key_id)
@@ -172,6 +174,11 @@ class EncryptionService:
         # Encrypt enhanced analysis if provided
         if enhanced_analysis:
             encrypted_data['enhanced_analysis'] = cipher.encrypt(enhanced_analysis.encode('utf-8')).decode('ascii')
+
+        # Encrypt structured multi-agent investigation payload if provided
+        if investigation is not None:
+            inv_json = json.dumps(investigation, default=str, ensure_ascii=False)
+            encrypted_data['investigation'] = cipher.encrypt(inv_json.encode('utf-8')).decode('ascii')
         
         return encrypted_data, key_id
 
@@ -221,6 +228,16 @@ class EncryptionService:
                     decrypted_data['enhanced_analysis'] = None
             else:
                 decrypted_data['enhanced_analysis'] = None
+
+            # Decrypt structured investigation payload if present (backward-compatible)
+            if encrypted_data.get('investigation'):
+                try:
+                    decrypted_inv_json = cipher.decrypt(encrypted_data['investigation'].encode('ascii')).decode('utf-8')
+                    decrypted_data['investigation'] = json.loads(decrypted_inv_json)
+                except Exception:
+                    decrypted_data['investigation'] = None
+            else:
+                decrypted_data['investigation'] = None
                 
             return decrypted_data
         
@@ -229,7 +246,8 @@ class EncryptionService:
             return {
                 'summary': "",
                 'techniques': [],
-                'enhanced_analysis': None
+                'enhanced_analysis': None,
+                'investigation': None,
             }
 
 # Global service instance

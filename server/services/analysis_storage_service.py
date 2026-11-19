@@ -68,21 +68,24 @@ class AnalysisStorageService:
                 else:
                     logger.warning(f"Technique {tech} does not have model_dump method!")
             
-            # Convert summary and enhanced_analysis if they contain datetime objects
+            # Convert summary, enhanced_analysis, and optional investigation payload if they contain datetimes
             clean_summary = convert_datetimes_to_strings(response.summary)
             clean_enhanced_analysis = convert_datetimes_to_strings(response.enhanced_analysis) if response.enhanced_analysis else None
+            raw_investigation = getattr(response, 'investigation', None)
+            clean_investigation = convert_datetimes_to_strings(raw_investigation) if raw_investigation is not None else None
             
             logger.info(f"Final data for encryption:")
-            logger.info(f"  - Summary: '{clean_summary}' (len: {len(str(clean_summary))})")
+            logger.info(f"  - Summary len: {len(str(clean_summary))}")
             logger.info(f"  - Techniques: {len(serializable_techniques)} items")
-            logger.info(f"  - Enhanced analysis: {clean_enhanced_analysis}")
+            logger.info(f"  - Has investigation payload: {clean_investigation is not None}")
             
             # Encrypt the analysis results using user's hashed password
             encrypted_results, key_id = encryption_service.encrypt_analysis_results(
                 summary=clean_summary,
                 techniques=serializable_techniques,
                 enhanced_analysis=clean_enhanced_analysis,
-                hashed_password=hashed_password  # Use hashed password instead of user_id
+                hashed_password=hashed_password,
+                investigation=clean_investigation,
             )
             
             # Create document
@@ -91,6 +94,7 @@ class AnalysisStorageService:
                 "encrypted_summary": encrypted_results['summary'],
                 "encrypted_techniques": encrypted_results['techniques'],
                 "encrypted_enhanced_analysis": encrypted_results.get('enhanced_analysis'),
+                "encrypted_investigation": encrypted_results.get('investigation'),
                 "analysis_timestamp": datetime.utcnow(),
                 "processing_time_ms": getattr(response, 'processing_time_ms', 0),
                 "techniques_count": len(serializable_techniques),  # Use serializable_techniques count
@@ -151,7 +155,8 @@ class AnalysisStorageService:
             encrypted_payload = {
                 "summary": doc.get("encrypted_summary"),
                 "techniques": doc.get("encrypted_techniques"),
-                "enhanced_analysis": doc.get("encrypted_enhanced_analysis")
+                "enhanced_analysis": doc.get("encrypted_enhanced_analysis"),
+                "investigation": doc.get("encrypted_investigation"),
             }
             
             decrypted_data = encryption_service.decrypt_analysis_results(
@@ -163,6 +168,7 @@ class AnalysisStorageService:
                 "summary": decrypted_data.get("summary"),
                 "matched_techniques": decrypted_data.get("techniques"),
                 "enhanced_analysis": decrypted_data.get("enhanced_analysis"),
+                "investigation": decrypted_data.get("investigation"),
                 "analysis_timestamp": self.convert_datetime_to_string(doc.get("analysis_timestamp")),
                 "processing_time_ms": doc.get("processing_time_ms", 0)
             }

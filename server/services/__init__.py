@@ -25,6 +25,6 @@ def __getattr__(name: str) -> Any:
         mod_path, attr = _EXPORTS[name]
         module = importlib.import_module(mod_path, __name__)
         return getattr(module, attr)
-    if name == "knowledge":
-        return importlib.import_module(".knowledge", __name__)
+    if name in ("knowledge", "investigation"):
+        return importlib.import_module(f".{name}", __name__)
     raise AttributeError(f"module {__name__!r} has no attribute {name!r}")

@@ -20,6 +20,9 @@ dependencies = [
     "pyreadline3>=3.5.4",
     "cognee",
     "fastembed",
+    "langgraph>=0.4.0",
+    "langchain-core>=0.3.0",
+    "langchain-google-genai>=2.1.0",
 ]
 
 [project.optional-dependencies]
