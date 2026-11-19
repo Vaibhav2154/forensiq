@@ -77,6 +77,33 @@ class AnalysisChatResponse(BaseModel):
     model_used: str = Field(default="", description="Gemini model name used to generate the answer")
     processing_time_ms: float = Field(default=0.0, ge=0.0, description="End-to-end chatbot processing time in milliseconds")
 
+
+class RemediationStatusUpdateRequest(BaseModel):
+    """Audit sync payload reported by the local HITL TUI after approval, rejection, or rollback."""
+    recommendation_id: str = Field(..., min_length=1, description="Target RecommendationItem.recommendation_id")
+    execution_status: Literal[
+        "pending_approval",
+        "approved",
+        "executed",
+        "failed",
+        "rejected",
+        "rolled_back",
+    ] = Field(..., description="Updated HITL execution status")
+    receipt_id: Optional[str] = Field(default=None, description="Local rollback journal receipt ID")
+    executed_by: Optional[str] = Field(default=None, description="Local host username who authorized the action")
+    notes: Optional[str] = Field(default=None, max_length=1000, description="Optional analyst or execution notes")
+    analysis_id: Optional[str] = Field(default=None, description="Optional MongoDB analysis ID for direct lookup")
+
+
+class RemediationStatusUpdateResponse(BaseModel):
+    """Confirmation payload returned when a remediation status update is persisted."""
+    analysis_id: str
+    investigation_id: Optional[str] = None
+    recommendation_id: str
+    execution_status: str
+    receipt_id: Optional[str] = None
+    recorded_at: datetime = Field(default_factory=datetime.utcnow)
+
 class DatabaseStats(BaseModel):
     """Model for database statistics."""
     total_techniques: int = Field(..., description="Total number of techniques in database")

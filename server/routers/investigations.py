@@ -7,6 +7,9 @@ from typing import Any
 from fastapi import APIRouter, Depends, HTTPException, Query
 
 from contracts import BatchIngestRequest, InvestigationInput
+from model.logs_model import RemediationStatusUpdateRequest, RemediationStatusUpdateResponse
+from routers.auth import get_current_user
+from services.analysis_storage_service import analysis_storage_service
 from services.investigation import InvestigationResult, InvestigationService
 
 
@@ -72,3 +75,35 @@ async def run_investigation_from_batch(
         raise HTTPException(status_code=503, detail=str(exc)) from exc
     except Exception as exc:
         raise HTTPException(status_code=500, detail=f"Batch investigation failed: {exc}") from exc
+
+
+@router.post("/{investigation_id}/remediation-status", response_model=RemediationStatusUpdateResponse)
+async def sync_investigation_remediation_status(
+    investigation_id: str,
+    payload: RemediationStatusUpdateRequest,
+    current_user: dict = Depends(get_current_user),
+) -> RemediationStatusUpdateResponse:
+    """Sync a HITL TUI remediation outcome by investigation_id (or optional analysis_id)."""
+    try:
+        updated = await analysis_storage_service.update_remediation_status(
+            user_id=current_user["username"],
+            analysis_id=payload.analysis_id,
+            investigation_id=investigation_id,
+            recommendation_id=payload.recommendation_id,
+            execution_status=payload.execution_status,
+            receipt_id=payload.receipt_id,
+            executed_by=payload.executed_by,
+            notes=payload.notes,
+        )
+        if not updated:
+            raise HTTPException(
+                status_code=404,
+                detail="Stored investigation or recommendation_id not found",
+            )
+        return RemediationStatusUpdateResponse(**updated)
+    except HTTPException:
+        raise
+    except Exception as exc:
+        raise HTTPException(
+            status_code=500, detail=f"Failed to sync remediation status: {exc}"
+        ) from exc

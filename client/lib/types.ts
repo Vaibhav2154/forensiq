@@ -212,6 +212,34 @@ export interface RecommendationItem {
   requires_human_approval: boolean;
   auto_executable: boolean;
   rollback_notes: string;
+  fixable_via_tui?: boolean;
+  fix_tier?: 'tier_1_playbook' | 'tier_2_config_diff' | 'tier_3_advisory' | string;
+  playbook_id?: string;
+  playbook_params?: Record<string, string>;
+  execution_status?:
+    | 'pending_approval'
+    | 'approved'
+    | 'executed'
+    | 'failed'
+    | 'rejected'
+    | 'rolled_back'
+    | string;
+}
+
+export interface RemediationAuditEvent {
+  recommendation_id: string;
+  execution_status:
+    | 'pending_approval'
+    | 'approved'
+    | 'executed'
+    | 'failed'
+    | 'rejected'
+    | 'rolled_back'
+    | string;
+  receipt_id?: string | null;
+  executed_by?: string | null;
+  recorded_at: string;
+  notes?: string | null;
 }
 
 export interface InvestigationFinding {
@@ -257,6 +285,7 @@ export interface InvestigationResult {
   iocs: ObservedIOC[];
   recommendations: RecommendationItem[];
   recommendation_status: 'drafted' | 'skipped_unjustified' | string;
+  remediation_history?: RemediationAuditEvent[];
   sequence_assessment: SequenceAnalysisOutput;
   potential_impact: string[];
   uncertainty_and_gaps: string[];

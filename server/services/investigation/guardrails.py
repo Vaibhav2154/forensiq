@@ -491,6 +491,15 @@ def sanitize_recommendations(
             resolved = _resolve_verified_id(mid, valid_source_ids, record_to_source)
             if resolved:
                 resolved_mits.append(resolved)
+        is_manual = rec.playbook_id == "manual_only" or not rec.playbook_params
+        fixable = False if is_manual else bool(rec.fixable_via_tui)
+        fix_tier = "tier_3_advisory" if not fixable else rec.fix_tier
+        playbook_id = "manual_only" if not fixable else rec.playbook_id
+        playbook_params = (
+            {}
+            if not fixable
+            else {str(k): str(v) for k, v in rec.playbook_params.items() if str(k).strip()}
+        )
         cleaned.append(
             RecommendationItem(
                 recommendation_id=rec.recommendation_id,
@@ -511,6 +520,11 @@ def sanitize_recommendations(
                 requires_human_approval=True,
                 auto_executable=False,
                 rollback_notes=rec.rollback_notes,
+                fixable_via_tui=fixable,
+                fix_tier=fix_tier,
+                playbook_id=playbook_id,
+                playbook_params=playbook_params,
+                execution_status=rec.execution_status,
             )
         )
     return cleaned

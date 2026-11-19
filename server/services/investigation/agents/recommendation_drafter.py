@@ -11,9 +11,11 @@ from services.investigation.guardrails import build_verified_source_ids
 from services.investigation.llm_factory import GeminiAgentFactory
 from services.investigation.models import (
     AuditEntry,
+    RecommendationDraftOutput,
     RecommendationItem,
     RecommendationOutput,
 )
+from services.investigation.playbook_tagger import tag_recommendations_for_tui
 from services.investigation.prompts import RECOMMENDATION_DRAFTER_SYSTEM_PROMPT
 from services.investigation.state import InvestigationState
 
@@ -80,20 +82,41 @@ def make_recommendation_drafter_node(llm_factory: GeminiAgentFactory):
         key_slot = ""
 
         try:
-            output, model_name, key_slot = await llm_factory.invoke_structured(
+            # Use Gemini-safe RecommendationDraftOutput (no arbitrary dict fields) for live
+            # Gemini calls; preserve RecommendationOutput schema when custom mock runners are used.
+            target_schema = (
+                RecommendationOutput
+                if getattr(llm_factory, "_custom_runner", None) is not None
+                else RecommendationDraftOutput
+            )
+            raw_output, model_name, key_slot = await llm_factory.invoke_structured(
                 role="recommendation_drafter",
-                schema=RecommendationOutput,
+                schema=target_schema,
                 system_prompt=RECOMMENDATION_DRAFTER_SYSTEM_PROMPT,
                 user_prompt=user_prompt,
             )
-            if output.recommendations:
-                enforced = [
-                    rec.model_copy(
-                        update={"requires_human_approval": True, "auto_executable": False}
-                    )
-                    for rec in output.recommendations
+            if isinstance(raw_output, RecommendationDraftOutput):
+                converted_items = [
+                    RecommendationItem(**item.model_dump())
+                    for item in raw_output.recommendations
                 ]
-                output = output.model_copy(update={"status": "drafted", "recommendations": enforced})
+                output = RecommendationOutput(
+                    status=raw_output.status,
+                    recommendations=converted_items,
+                    rationale=raw_output.rationale,
+                )
+            else:
+                output = raw_output
+
+            if output.recommendations:
+                tagged_items = tag_recommendations_for_tui(
+                    recommendations=output.recommendations,
+                    events=inv_input.normalized_events,
+                    event_analysis=event_analysis,
+                )
+                output = output.model_copy(
+                    update={"status": "drafted", "recommendations": tagged_items}
+                )
         except Exception as exc:
             logger.warning("RecommendationDrafter LLM call failed, using fallback: %s", exc)
             output = _fallback_recommendations(state)

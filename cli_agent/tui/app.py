@@ -40,6 +40,7 @@ from __future__ import annotations
 import asyncio
 import os
 import platform as platform_module
+import shlex
 import time
 from collections import deque
 from datetime import datetime, timezone
@@ -63,11 +64,22 @@ from textual.widgets import (
     Static,
 )
 
+from ..remediation.models import (
+    CommandOrDiffPreview,
+    ExecutionReceipt,
+    PreflightReport,
+    RemediationItemView,
+)
 from ..services.cli_service import CliService
 from ..services.config_service import ClientConfig
 from ..services.errors import ConfigurationError, ForensIQError
 from ..services.monitoring_service import CycleOutcome, MonitoringState
 from ..services.response_adapter import AnalysisView, adapt_analysis
+from .remediation_modals import (
+    RejectReasonScreen,
+    RemediationConfirmScreen,
+    RollbackConfirmScreen,
+)
 from .state import AppState, BackendStatus, CycleRecord
 from .theme import FORENSIQ_THEME, THEME_NAME, rich_colour, theme_variable_defaults
 
@@ -78,6 +90,7 @@ NAV_ITEMS = [
     ("knowledge", "Knowledge", "ATT&CK / CVE store"),
     ("sessions", "Sessions", "Backend monitoring sessions"),
     ("settings", "Settings", "Profile and endpoint"),
+    ("remediation", "Remediation", "HITL system fixes & rollback"),
 ]
 
 VIEW_DESCRIPTIONS = {
@@ -87,6 +100,7 @@ VIEW_DESCRIPTIONS = {
     "knowledge": "backend knowledge store",
     "sessions": "backend session history",
     "settings": "configuration and account",
+    "remediation": "human-in-the-loop system fixes & rollback",
 }
 
 # Panel headings per destination: (monitor panel, technique panel).
@@ -97,6 +111,7 @@ PANEL_HEADINGS = {
     "knowledge": ("KNOWLEDGE STORE", "SEARCH RESULTS"),
     "sessions": ("CURRENT SESSION", "SESSION HISTORY"),
     "settings": ("CONFIGURATION", "ACCOUNT"),
+    "remediation": ("HITL REMEDIATION QUEUE", "RECOMMENDATIONS & PREVIEW"),
 }
 
 TECHNIQUE_ROWS = 25
@@ -180,11 +195,16 @@ class ForensIQApp(App):
         ("4", "goto('knowledge')", "Knowledge"),
         ("5", "goto('sessions')", "Sessions"),
         ("6", "goto('settings')", "Settings"),
+        ("7", "goto('remediation')", "Remediation"),
         ("s", "start_monitoring", "Start"),
         ("x", "stop_monitoring", "Stop"),
         ("t", "tick", "Force cycle"),
         ("l", "login", "Sign in"),
         ("o", "logout", "Sign out"),
+        ("a", "remediation_approve", "Approve"),
+        ("d", "remediation_dry_run", "Dry-Run"),
+        ("r", "remediation_reject", "Reject"),
+        ("u", "remediation_undo", "Undo"),
     ]
 
     def __init__(
@@ -228,7 +248,10 @@ class ForensIQApp(App):
                 yield Label("security operations", id="brand-sub")
                 yield ListView(
                     *[
-                        ListItem(Label(f"{index + 1}  {label}"), id=f"nav-{key}")
+                        ListItem(
+                            Label(f"{index + 1}  {label}", id=f"nav-label-{key}"),
+                            id=f"nav-{key}",
+                        )
                         for index, (key, label, _desc) in enumerate(NAV_ITEMS)
                     ]
                 )
@@ -268,6 +291,13 @@ class ForensIQApp(App):
                             with Horizontal(id="knowledge-form"):
                                 yield Input(placeholder="search ATT&CK / CVE", id="knowledge-query")
                                 yield Button("Search", id="btn-knowledge-search")
+                            with Vertical(id="remediation-controls"):
+                                with Horizontal(id="remediation-controls-row1"):
+                                    yield Button("Approve [A]", id="btn-rem-approve", variant="success")
+                                    yield Button("Dry-Run [D]", id="btn-rem-dry-run")
+                                with Horizontal(id="remediation-controls-row2"):
+                                    yield Button("Reject [R]", id="btn-rem-reject", variant="error")
+                                    yield Button("Undo [U]", id="btn-rem-undo")
                             yield Label("", id="form-error")
                     with Vertical(id="technique-panel"):
                         yield Label("MATCHED TECHNIQUES", id="technique-heading", classes="panel-title")
@@ -298,6 +328,10 @@ class ForensIQApp(App):
         self.state.platform = f"{platform_module.system()} {platform_module.release()}"
         self.state.interval_seconds = self.service.config.interval_seconds
         self.state.sources = tuple(self.service.config.sources)
+        try:
+            self.state.remediation_journal = self.service.remediation.list_journal()
+        except Exception:  # noqa: BLE001 - corrupt journal must not block startup
+            self.state.remediation_journal = []
 
         self._write_stream(("muted", f"forensiq {escape(self.service.config.base_url)}"))
         if self._restore_on_start:
@@ -404,12 +438,14 @@ class ForensIQApp(App):
     async def _load_view(self, key: str) -> None:
         self.state.loading.add(key)
         try:
-            if key in ("dashboard", "monitoring", "analysis", "sessions", "settings"):
+            if key in ("dashboard", "monitoring", "analysis", "sessions", "settings", "remediation"):
                 await self._probe_backend()
             if key in ("dashboard", "monitoring"):
                 await self._load_collector_info()
             if key == "analysis":
                 await self._load_analysis()
+            elif key == "remediation":
+                await self._load_remediation()
             elif key == "sessions":
                 await self._load_sessions()
             elif key == "knowledge":
@@ -420,6 +456,63 @@ class ForensIQApp(App):
             self.state.loading.discard(key)
             self._sync_state()
             self._render_page()
+
+    def _sync_remediation_from_analysis(self, view: AnalysisView | None) -> None:
+        items = self.service.remediation.extract_recommendations(
+            view.investigation if view is not None else None
+        )
+        try:
+            journal = self.service.remediation.list_journal()
+        except Exception:  # noqa: BLE001
+            journal = []
+        self.state.remediation_journal = journal
+        inv_id = (
+            str((view.investigation or {}).get("investigation_id") or "")
+            if view is not None
+            else ""
+        )
+        if inv_id and journal:
+            # Reconcile local journal state if backend hasn't synced yet.
+            latest_by_rec: dict[str, ExecutionReceipt] = {}
+            for rec in journal:
+                if rec.investigation_id == inv_id and rec.recommendation_id not in latest_by_rec:
+                    latest_by_rec[rec.recommendation_id] = rec
+            for item in items:
+                if item.execution_status == "pending_approval":
+                    matched = latest_by_rec.get(item.recommendation_id)
+                    if matched is not None and matched.status in ("executed", "rolled_back", "failed"):
+                        item.execution_status = matched.status
+        self.state.remediation_items = items
+        if not items:
+            self.state.selected_remediation_index = 0
+        else:
+            self.state.selected_remediation_index = min(
+                self.state.selected_remediation_index, len(items) - 1
+            )
+        self.state.remediation_preflight.clear()
+        self.state.remediation_previews.clear()
+        self.state.remediation_status = "loaded" if items else "empty"
+        self.state.remediation_error = None
+
+    async def _load_remediation(self) -> None:
+        try:
+            self.state.remediation_journal = await asyncio.to_thread(
+                self.service.remediation.list_journal
+            )
+        except Exception:  # noqa: BLE001
+            self.state.remediation_journal = []
+        if self.state.latest_analysis is None:
+            if not self.service.is_authenticated:
+                self.state.remediation_status = "empty"
+                self.state.remediation_error = "not authenticated - press l to sign in"
+                return
+            await self._load_analysis()
+            if self.state.analysis_error:
+                self.state.remediation_status = "unavailable"
+                self.state.remediation_error = self.state.analysis_error
+                return
+        elif not self.state.remediation_items:
+            self._sync_remediation_from_analysis(self.state.latest_analysis)
 
     async def _load_analysis(self) -> None:
         if not self.service.is_authenticated:
@@ -449,6 +542,7 @@ class ForensIQApp(App):
         self.state.analysis_status = "loaded"
         self.state.analysis_error = None
         self.techniques_found = view.technique_count
+        self._sync_remediation_from_analysis(view)
 
     async def _load_sessions(self) -> None:
         if not self.service.is_authenticated:
@@ -625,16 +719,26 @@ class ForensIQApp(App):
             self.query_one("#monitor-heading", Label).update(monitor_heading)
             self.query_one("#technique-heading", Label).update(technique_heading)
             self._render_cards()
+            self._update_nav_badges()
             self.query_one("#monitor-detail", Static).update(self._monitor_markup())
             self.query_one("#page-detail-text", Static).update(self._detail_markup())
             self.query_one("#stream-panel").display = self.view in ("dashboard", "monitoring") and not self._compact
             self.query_one("#settings-form").display = self.view == "settings"
             self.query_one("#knowledge-form").display = self.view == "knowledge"
+            self.query_one("#remediation-controls").display = self.view == "remediation"
             self._fill_forms()
             self._render_table()
             self._render_detail_view()
             self._update_buttons()
         except Exception:  # pragma: no cover - widgets missing only during teardown
+            pass
+
+    def _update_nav_badges(self) -> None:
+        pending = self.state.pending_fixable_count
+        label = f"7  Remediation ({pending})" if pending > 0 else "7  Remediation"
+        try:
+            self.query_one("#nav-label-remediation", Label).update(label)
+        except Exception:  # pragma: no cover
             pass
 
     def _render_cards(self) -> None:
@@ -753,6 +857,18 @@ class ForensIQApp(App):
                 f"history      {escape(st.sessions_status)}",
                 f"monitoring   {st.monitoring_state}",
             ]
+        elif self.view == "remediation":
+            total = len(st.remediation_items)
+            pending = st.pending_fixable_count
+            executed = sum(1 for item in st.remediation_items if item.execution_status == "executed")
+            advisory = sum(1 for item in st.remediation_items if not item.is_executable_locally)
+            lines += [
+                f"queue        {total} proposal(s)",
+                f"pending fix  {pending} actionable",
+                f"executed     {executed}",
+                f"advisory     {advisory} manual-only",
+                f"journal      {len(st.remediation_journal)} receipt(s)",
+            ]
         else:  # settings
             profile = st.profile
             lines += [
@@ -818,6 +934,15 @@ class ForensIQApp(App):
                 "Session rows are owned by the backend. Started/stopped times\n"
                 "come from the API response; no local history is kept."
             )
+        if self.view == "remediation":
+            lines = []
+            if st.remediation_error:
+                lines.append(f"[{self._colour('bad')}]{escape(st.remediation_error)}[/{self._colour('bad')}]")
+            lines.append(
+                "Server proposes, local TUI disposes.\n"
+                "Keys: [A] Approve  [D] Dry-Run  [R] Reject  [U] Undo."
+            )
+            return "\n".join(lines)
         return "Edit the fields below and save. Values are validated before\nany file is written; the token store is never touched."
 
     def _view_note(self) -> str:
@@ -835,6 +960,12 @@ class ForensIQApp(App):
             detail = f"{total} record(s)" if total is not None else st.knowledge_status
         elif self.view == "sessions":
             detail = f"{len(st.sessions)} row(s)"
+        elif self.view == "remediation":
+            detail = (
+                f"{len(st.remediation_items)} item(s) - "
+                f"{st.pending_fixable_count} pending fixable - "
+                f"{len(st.remediation_journal)} receipt(s)"
+            )
         elif self.view == "settings":
             sources = ", ".join(self.service.config.sources) or "all available"
             detail = (
@@ -928,6 +1059,27 @@ class ForensIQApp(App):
                         self._fmt_time(row.get("created_at")),
                         self._fmt_time(row.get("stopped_at")) if row.get("stopped_at") else "-",
                     )
+        elif self.view == "remediation":
+            self._set_columns(table, ("ID", "Tier", "Priority", "Status", "Title"))
+            table.clear(columns=False)
+            if not self.state.remediation_items:
+                table.add_row("-", "-", "-", "-", "no remediation proposals in latest investigation")
+            else:
+                for item in self.state.remediation_items[:ROW_LIMIT]:
+                    table.add_row(
+                        escape(item.recommendation_id[:12]),
+                        escape(item.tier_label),
+                        escape(item.priority[:12]),
+                        escape(item.execution_status),
+                        escape(item.title[:36]),
+                        key=item.recommendation_id,
+                    )
+                idx = max(0, min(self.state.selected_remediation_index, len(self.state.remediation_items) - 1))
+                self.state.selected_remediation_index = idx
+                try:
+                    table.move_cursor(row=idx)
+                except Exception:  # pragma: no cover
+                    pass
         else:  # settings
             self._set_columns(table, ("Setting", "Value"))
             table.clear(columns=False)
@@ -1016,7 +1168,90 @@ class ForensIQApp(App):
             return "\n".join(lines)
         if self.view == "monitoring" and st.last_error:
             return f"LAST ERROR\n\n{st.last_error}\n"
+        if self.view == "remediation":
+            return self._remediation_detail_text()
         return None
+
+    def _remediation_detail_text(self) -> str:
+        st = self.state
+        blocks: list[str] = []
+        item = self._selected_remediation()
+        if item is None:
+            blocks.append("REMEDIATION PREVIEW")
+            if st.remediation_error:
+                blocks.append(st.remediation_error)
+            else:
+                blocks.append(
+                    "No recommendations loaded from the latest investigation.\n"
+                    "Run an analysis or press 3 (Analysis) to fetch the latest report."
+                )
+        else:
+            blocks += [
+                f"SELECTED PROPOSAL: {item.recommendation_id} — {item.title}",
+                f"  Tier / Playbook : {item.tier_label} ({item.fix_tier}) · {item.playbook_id}",
+                f"  Status          : {item.execution_status}  (human_approval=True, auto_exec=False)",
+                f"  Priority        : {item.priority}",
+                f"  Target          : {item.target}",
+                f"  Findings        : {', '.join(item.supporting_finding_ids) or '-'}",
+                f"  Evidence IDs    : {', '.join(item.evidence_event_ids) or '-'}",
+                f"  Mitigations     : {', '.join(item.knowledge_mitigation_ids) or '-'}",
+                f"  Action          : {item.action}",
+            ]
+            if item.expected_effect:
+                blocks.append(f"  Expected Effect : {item.expected_effect}")
+            if item.analyst_note:
+                blocks.append(f"  Analyst Note    : {item.analyst_note}")
+            blocks.append("")
+
+            preflight = st.remediation_preflight.get(item.recommendation_id)
+            if preflight is not None:
+                badge = "PASS" if preflight.passed else "WARN"
+                blocks.append(f"PRE-FLIGHT [{badge}]: {preflight.summary}")
+                for detail in preflight.details:
+                    blocks.append(f"  - {detail}")
+                blocks.append("")
+            else:
+                blocks.append("PRE-FLIGHT: Not run yet. Press [D] to inspect host state without modifying it.")
+                blocks.append("")
+
+            preview = st.remediation_previews.get(item.recommendation_id)
+            if preview is None:
+                try:
+                    preview = self.service.remediation.preview(item)
+                except ValueError as exc:
+                    preview = CommandOrDiffPreview(summary=f"Validation blocked execution: {exc}")
+
+            if not item.is_executable_locally:
+                blocks.append("[ADVISORY_ONLY] Manual runbook — cannot be executed automatically from TUI.")
+            elif preview.command_argv:
+                cmd_str = " ".join(shlex.quote(arg) for arg in preview.command_argv)
+                blocks.append("EXACT COMMAND PREVIEW (shell=False):")
+                blocks.append(f"  {cmd_str}")
+            if preview.unified_diff:
+                blocks.append("UNIFIED DIFF PREVIEW:")
+                blocks.append(preview.unified_diff)
+            if preview.summary:
+                blocks.append(f"PREVIEW NOTE: {preview.summary}")
+            if preview.rollback_argv:
+                rb_str = " ".join(shlex.quote(arg) for arg in preview.rollback_argv)
+                blocks.append(f"ROLLBACK COMMAND: {rb_str}")
+            elif item.rollback_notes:
+                blocks.append(f"ROLLBACK NOTES: {item.rollback_notes}")
+
+        blocks += ["", "LOCAL ROLLBACK JOURNAL (~/.forensiq/remediation_journal.json)"]
+        if not st.remediation_journal:
+            blocks.append("  No local remediation receipts recorded yet.")
+        else:
+            for rec in st.remediation_journal[:10]:
+                rb_info = f"backup={rec.backup_path}" if rec.backup_path else (
+                    "rollback=" + " ".join(shlex.quote(a) for a in rec.rollback_argv)
+                    if rec.rollback_argv
+                    else "no rollback argv"
+                )
+                blocks.append(
+                    f"  [{rec.status}] {rec.receipt_id} · {rec.recommendation_id} · {rec.playbook_id} · {rec.executed_at_utc} ({rb_info})"
+                )
+        return "\n".join(blocks)
 
     def _fill_forms(self) -> None:
         config = self.service.config
@@ -1038,6 +1273,22 @@ class ForensIQApp(App):
         running = state in ("running", "starting")
         self.query_one("#btn-start", Button).disabled = running
         self.query_one("#btn-stop", Button).disabled = state == "stopped"
+        item = self._selected_remediation()
+        try:
+            self.query_one("#btn-rem-approve", Button).disabled = (
+                item is None
+                or not item.is_executable_locally
+                or item.execution_status not in ("pending_approval", "failed")
+            )
+            self.query_one("#btn-rem-dry-run", Button).disabled = item is None
+            self.query_one("#btn-rem-reject", Button).disabled = (
+                item is None or item.execution_status != "pending_approval"
+            )
+            self.query_one("#btn-rem-undo", Button).disabled = (
+                self._target_rollback_receipt() is None
+            )
+        except Exception:  # pragma: no cover
+            pass
 
     # -- monitoring callbacks (delivered from the service loop task) ------
     def _on_state_change(self, state: MonitoringState) -> None:
@@ -1075,6 +1326,7 @@ class ForensIQApp(App):
         self.state.analysis_status = "loaded"
         self.state.analysis_error = None
         self.techniques_found = view.technique_count
+        self._sync_remediation_from_analysis(view)
         self._sync_state()
         self._refresh_live()
 
@@ -1112,10 +1364,11 @@ class ForensIQApp(App):
             return
         try:
             self._render_cards()
+            self._update_nav_badges()
             self.query_one("#monitor-detail", Static).update(self._monitor_markup())
             self.query_one("#page-detail-text", Static).update(self._detail_markup())
             self._update_buttons()
-            if self.view in ("dashboard", "monitoring", "analysis"):
+            if self.view in ("dashboard", "monitoring", "analysis", "remediation"):
                 self._render_table()
                 self._render_detail_view()
             self.query_one("#view-note", Label).update(self._view_note())
@@ -1255,6 +1508,304 @@ class ForensIQApp(App):
         if outcome is None:
             self._notify("monitoring is not running", "warn")
 
+    # -- HITL remediation actions -----------------------------------------
+    def _selected_remediation(self) -> RemediationItemView | None:
+        items = self.state.remediation_items
+        if not items:
+            return None
+        idx = max(0, min(self.state.selected_remediation_index, len(items) - 1))
+        return items[idx]
+
+    def _target_rollback_receipt(self) -> ExecutionReceipt | None:
+        item = self._selected_remediation()
+        if item is not None:
+            for rec in self.state.remediation_journal:
+                if rec.recommendation_id == item.recommendation_id and rec.status == "executed":
+                    return rec
+        for rec in self.state.remediation_journal:
+            if rec.status == "executed":
+                return rec
+        return None
+
+    def _current_investigation_ids(self) -> tuple[str, str | None]:
+        view = self.state.latest_analysis
+        inv_id = ""
+        analysis_id: str | None = None
+        if view is not None:
+            analysis_id = view.analysis_id
+            if isinstance(view.investigation, dict):
+                inv_id = str(view.investigation.get("investigation_id") or "")
+        return inv_id or "local-investigation", analysis_id
+
+    async def action_remediation_dry_run(self) -> None:
+        if self.view != "remediation":
+            self._notify("open Remediation (7) to run dry-run checks", "warn")
+            return
+        item = self._selected_remediation()
+        if item is None:
+            self._notify("no remediation proposal selected", "warn")
+            return
+        try:
+            report, preview = await asyncio.to_thread(self.service.remediation.dry_run, item)
+        except ValueError as exc:
+            report = PreflightReport(
+                passed=False,
+                requires_sudo=False,
+                summary=f"Validation blocked execution: {exc}",
+            )
+            preview = CommandOrDiffPreview(summary=str(exc))
+            self.state.remediation_preflight[item.recommendation_id] = report
+            self.state.remediation_previews[item.recommendation_id] = preview
+            self._notify(f"dry-run blocked for {item.recommendation_id}: {exc}", "bad")
+            self._render_page()
+            return
+        self.state.remediation_preflight[item.recommendation_id] = report
+        self.state.remediation_previews[item.recommendation_id] = preview
+        role = "ok" if report.passed else "warn"
+        self._notify(f"dry-run {item.recommendation_id}: {report.summary}", role)
+        self._render_page()
+
+    async def action_remediation_approve(self) -> None:
+        if self.view != "remediation":
+            self._notify("open Remediation (7) to approve fixes", "warn")
+            return
+        item = self._selected_remediation()
+        if item is None:
+            self._notify("no remediation proposal selected", "warn")
+            return
+        if not item.is_executable_locally:
+            self._notify(
+                f"[ADVISORY_ONLY] {item.recommendation_id} cannot be executed automatically from the TUI",
+                "warn",
+            )
+            return
+        if item.execution_status == "executed":
+            self._notify(
+                f"{item.recommendation_id} is already executed (press U to roll back)",
+                "warn",
+            )
+            return
+        try:
+            report, preview = await asyncio.to_thread(self.service.remediation.dry_run, item)
+        except ValueError as exc:
+            self._notify(f"validation blocked {item.recommendation_id}: {exc}", "bad")
+            return
+        self.state.remediation_preflight[item.recommendation_id] = report
+        self.state.remediation_previews[item.recommendation_id] = preview
+        self._render_page()
+        self.push_screen(
+            RemediationConfirmScreen(item, preview, report),
+            lambda result: self._on_remediation_confirmed(item, result),
+        )
+
+    def _on_remediation_confirmed(
+        self,
+        item: RemediationItemView,
+        result: tuple[bool, str | None] | None,
+    ) -> None:
+        if not result or not result[0]:
+            self._notify(f"remediation cancelled for {item.recommendation_id}", "warn")
+            return
+        _, sudo_password = result
+        self.run_worker(
+            self._execute_remediation_item(item, sudo_password),
+            group="remediation-exec",
+            exclusive=True,
+        )
+
+    async def _execute_remediation_item(
+        self,
+        item: RemediationItemView,
+        sudo_password: str | None,
+    ) -> None:
+        inv_id, analysis_id = self._current_investigation_ids()
+        try:
+            receipt = await asyncio.to_thread(
+                self.service.remediation.execute,
+                item,
+                investigation_id=inv_id,
+                analysis_id=analysis_id,
+                sudo_password=sudo_password,
+            )
+        except Exception as exc:  # noqa: BLE001
+            self._notify(f"execution failed for {item.recommendation_id}: {self._short_error(exc)}", "bad")
+            self._render_page()
+            return
+        finally:
+            sudo_password = None
+
+        item.execution_status = receipt.status
+        try:
+            self.state.remediation_journal = await asyncio.to_thread(
+                self.service.remediation.list_journal
+            )
+        except Exception:  # noqa: BLE001
+            pass
+
+        if receipt.status == "executed":
+            self._notify(
+                f"executed {item.recommendation_id} ({item.playbook_id}) · receipt {receipt.receipt_id}",
+                "ok",
+            )
+        else:
+            detail = receipt.stderr.strip()[:80] or f"exit {receipt.exit_code}"
+            self._notify(
+                f"playbook failed for {item.recommendation_id}: {detail}",
+                "bad",
+            )
+
+        await self._sync_remediation_status_best_effort(
+            recommendation_id=item.recommendation_id,
+            execution_status=receipt.status,
+            analysis_id=analysis_id,
+            investigation_id=inv_id,
+            receipt_id=receipt.receipt_id,
+            executed_by=receipt.executed_by,
+            notes=receipt.stderr[:200] if receipt.status == "failed" else None,
+        )
+        self._render_page()
+
+    def action_remediation_reject(self) -> None:
+        if self.view != "remediation":
+            self._notify("open Remediation (7) to reject proposals", "warn")
+            return
+        item = self._selected_remediation()
+        if item is None:
+            self._notify("no remediation proposal selected", "warn")
+            return
+        if item.execution_status != "pending_approval":
+            self._notify(
+                f"{item.recommendation_id} is already {item.execution_status}",
+                "warn",
+            )
+            return
+        self.push_screen(
+            RejectReasonScreen(item),
+            lambda result: self._on_remediation_rejected(item, result),
+        )
+
+    def _on_remediation_rejected(
+        self,
+        item: RemediationItemView,
+        result: tuple[bool, str] | None,
+    ) -> None:
+        if not result or not result[0]:
+            self._notify(f"rejection cancelled for {item.recommendation_id}", "warn")
+            return
+        _, reason = result
+        item.execution_status = "rejected"
+        item.analyst_note = reason
+        note_suffix = f" ({reason})" if reason else ""
+        self._notify(f"rejected {item.recommendation_id}{note_suffix}", "warn")
+        self._render_page()
+        inv_id, analysis_id = self._current_investigation_ids()
+        self.run_worker(
+            self._sync_remediation_status_best_effort(
+                recommendation_id=item.recommendation_id,
+                execution_status="rejected",
+                analysis_id=analysis_id,
+                investigation_id=inv_id,
+                executed_by=self.state.username,
+                notes=reason or None,
+            ),
+            group="remediation-sync",
+        )
+
+    def action_remediation_undo(self) -> None:
+        if self.view != "remediation":
+            self._notify("open Remediation (7) to roll back fixes", "warn")
+            return
+        receipt = self._target_rollback_receipt()
+        if receipt is None:
+            self._notify("no executed remediation receipt available to roll back", "warn")
+            return
+        self.push_screen(
+            RollbackConfirmScreen(receipt),
+            lambda result: self._on_rollback_confirmed(receipt, result),
+        )
+
+    def _on_rollback_confirmed(
+        self,
+        receipt: ExecutionReceipt,
+        result: tuple[bool, str | None] | None,
+    ) -> None:
+        if not result or not result[0]:
+            self._notify(f"rollback cancelled for {receipt.receipt_id}", "warn")
+            return
+        _, sudo_password = result
+        self.run_worker(
+            self._execute_rollback(receipt, sudo_password),
+            group="remediation-exec",
+            exclusive=True,
+        )
+
+    async def _execute_rollback(
+        self,
+        receipt: ExecutionReceipt,
+        sudo_password: str | None,
+    ) -> None:
+        try:
+            rb = await asyncio.to_thread(
+                self.service.remediation.rollback,
+                receipt.receipt_id,
+                sudo_password=sudo_password,
+            )
+        except Exception as exc:  # noqa: BLE001
+            self._notify(f"rollback failed for {receipt.receipt_id}: {self._short_error(exc)}", "bad")
+            self._render_page()
+            return
+        finally:
+            sudo_password = None
+
+        try:
+            self.state.remediation_journal = await asyncio.to_thread(
+                self.service.remediation.list_journal
+            )
+        except Exception:  # noqa: BLE001
+            pass
+
+        if rb.success:
+            for item in self.state.remediation_items:
+                if item.recommendation_id == receipt.recommendation_id:
+                    item.execution_status = "rolled_back"
+            self._notify(f"rolled back {receipt.receipt_id} ({receipt.playbook_id})", "ok")
+            await self._sync_remediation_status_best_effort(
+                recommendation_id=receipt.recommendation_id,
+                execution_status="rolled_back",
+                analysis_id=receipt.analysis_id or self._current_investigation_ids()[1],
+                investigation_id=receipt.investigation_id,
+                receipt_id=receipt.receipt_id,
+                executed_by=receipt.executed_by or self.state.username,
+                notes=rb.message or None,
+            )
+        else:
+            self._notify(f"rollback error for {receipt.receipt_id}: {rb.message}", "bad")
+        self._render_page()
+
+    async def _sync_remediation_status_best_effort(
+        self,
+        *,
+        recommendation_id: str,
+        execution_status: str,
+        analysis_id: str | None = None,
+        investigation_id: str | None = None,
+        receipt_id: str | None = None,
+        executed_by: str | None = None,
+        notes: str | None = None,
+    ) -> None:
+        try:
+            await self.service.sync_remediation_status(
+                recommendation_id,
+                execution_status,
+                analysis_id=analysis_id,
+                investigation_id=investigation_id,
+                receipt_id=receipt_id,
+                executed_by=executed_by,
+                notes=notes,
+            )
+        except Exception as exc:  # noqa: BLE001 - local fix succeeded; backend sync is best effort
+            self._notify(f"status sync skipped: {self._short_error(exc)}", "warn")
+
     # -- settings ---------------------------------------------------------
     def _save_settings(self) -> None:
         error_label = self.query_one("#form-error", Label)
@@ -1329,6 +1880,24 @@ class ForensIQApp(App):
         if event.input.id and event.input.id.startswith("settings-"):
             self._settings_dirty = True
 
+    def on_data_table_row_highlighted(self, event: DataTable.RowHighlighted) -> None:
+        if self.view != "remediation" or not self.state.remediation_items:
+            return
+        row_idx = event.cursor_row
+        if 0 <= row_idx < len(self.state.remediation_items) and row_idx != self.state.selected_remediation_index:
+            self.state.selected_remediation_index = row_idx
+            self._render_detail_view()
+            self._update_buttons()
+
+    def on_data_table_row_selected(self, event: DataTable.RowSelected) -> None:
+        if self.view != "remediation" or not self.state.remediation_items:
+            return
+        row_idx = event.cursor_row
+        if 0 <= row_idx < len(self.state.remediation_items):
+            self.state.selected_remediation_index = row_idx
+            self._render_detail_view()
+            self._update_buttons()
+
     def on_button_pressed(self, event: Button.Pressed) -> None:
         button_id = event.button.id
         if button_id == "btn-start":
@@ -1341,6 +1910,14 @@ class ForensIQApp(App):
             self._save_settings()
         elif button_id == "btn-knowledge-search":
             self.run_worker(self._run_knowledge_search(), exclusive=True)
+        elif button_id == "btn-rem-approve":
+            self.run_worker(self.action_remediation_approve(), exclusive=True)
+        elif button_id == "btn-rem-dry-run":
+            self.run_worker(self.action_remediation_dry_run(), exclusive=True)
+        elif button_id == "btn-rem-reject":
+            self.action_remediation_reject()
+        elif button_id == "btn-rem-undo":
+            self.action_remediation_undo()
 
     def on_input_submitted(self, event: Input.Submitted) -> None:
         if event.input.id == "knowledge-query":

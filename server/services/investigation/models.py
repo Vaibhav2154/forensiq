@@ -33,6 +33,7 @@ __all__ = [
     "EventAnalysisOutput",
     "EvidenceObservation",
     "EvidenceReference",
+    "FixTier",
     "FollowUpQueryPlan",
     "InvestigationFinding",
     "InvestigationInput",
@@ -43,8 +44,13 @@ __all__ = [
     "NormalizedEvent",
     "ObservedIOC",
     "OrchestratorReviewOutput",
+    "PlaybookId",
+    "RecommendationDraftItem",
+    "RecommendationDraftOutput",
     "RecommendationItem",
     "RecommendationOutput",
+    "RemediationAuditEvent",
+    "RemediationStatus",
     "ReviewIssue",
     "SequenceAnalysisOutput",
     "SequenceCue",
@@ -57,6 +63,29 @@ SeverityLevel = Literal["critical", "high", "medium", "low", "informational"]
 ConfidenceLevel = Literal["high", "medium", "low"]
 EvidenceLinkType = Literal["observed", "inferred"]
 AttackPathStatus = Literal["observed", "inferred", "unconfirmed"]
+
+PlaybookId = Literal[
+    "block_ip",
+    "lock_user",
+    "terminate_user_sessions",
+    "kill_process",
+    "fix_file_permissions",
+    "harden_sshd_config",
+    "quarantine_cron_file",
+    "upgrade_package",
+    "manual_only",
+]
+
+FixTier = Literal["tier_1_playbook", "tier_2_config_diff", "tier_3_advisory"]
+
+RemediationStatus = Literal[
+    "pending_approval",
+    "approved",
+    "executed",
+    "failed",
+    "rejected",
+    "rolled_back",
+]
 
 
 # ---------------------------------------------------------------------------
@@ -351,6 +380,34 @@ class OrchestratorReviewOutput(BaseModel):
 # ---------------------------------------------------------------------------
 
 
+class RecommendationDraftItem(BaseModel):
+    """Gemini-structured-output-safe recommendation draft (no arbitrary dict fields)."""
+
+    recommendation_id: str = Field(description="Short ID such as rec-001")
+    priority: Literal["immediate", "short_term", "long_term"]
+    title: str
+    target: str = Field(description="System, account, network control, or policy targeted")
+    action: str = Field(description="Concrete action to review and authorize")
+    expected_effect: str = Field(description="Expected security impact of taking this action")
+    supporting_finding_ids: list[str] = Field(default_factory=list)
+    evidence_event_ids: list[str] = Field(default_factory=list)
+    knowledge_mitigation_ids: list[str] = Field(
+        default_factory=list,
+        description="Verified MITRE mitigation IDs (e.g. M1032) if retrieved from Cognee",
+    )
+    requires_human_approval: Literal[True] = True
+    auto_executable: Literal[False] = False
+    rollback_notes: str = Field(default="")
+
+
+class RecommendationDraftOutput(BaseModel):
+    """Gemini-structured-output-safe wrapper emitted by the Recommendation Drafting LLM."""
+
+    status: Literal["drafted", "skipped_unjustified"] = Field(default="skipped_unjustified")
+    recommendations: list[RecommendationDraftItem] = Field(default_factory=list)
+    rationale: str = Field(default="")
+
+
 class RecommendationItem(BaseModel):
     """An evidence-linked, human-approval-gated remediation or containment proposal."""
 
@@ -370,6 +427,19 @@ class RecommendationItem(BaseModel):
     auto_executable: Literal[False] = False
     rollback_notes: str = Field(default="")
 
+    # HITL TUI Remediation extensions (backward-compatible defaults)
+    fixable_via_tui: bool = Field(
+        default=False,
+        description="True when a deterministic Tier-1 or Tier-2 local TUI playbook applies",
+    )
+    fix_tier: FixTier = Field(default="tier_3_advisory")
+    playbook_id: PlaybookId = Field(default="manual_only")
+    playbook_params: dict[str, str] = Field(
+        default_factory=dict,
+        description="Validated key-value parameters for the local TUI playbook",
+    )
+    execution_status: RemediationStatus = Field(default="pending_approval")
+
 
 class RecommendationOutput(BaseModel):
     """Structured output emitted by the Recommendation Drafting sub-agent."""
@@ -377,6 +447,17 @@ class RecommendationOutput(BaseModel):
     status: Literal["drafted", "skipped_unjustified"] = Field(default="skipped_unjustified")
     recommendations: list[RecommendationItem] = Field(default_factory=list)
     rationale: str = Field(default="")
+
+
+class RemediationAuditEvent(BaseModel):
+    """Audit event synced from the local TUI when an analyst approves, rejects, or rolls back a fix."""
+
+    recommendation_id: str
+    execution_status: RemediationStatus
+    receipt_id: str | None = None
+    executed_by: str | None = None
+    notes: str | None = None
+    recorded_at: datetime = Field(default_factory=lambda: datetime.now(timezone.utc))
 
 
 # ---------------------------------------------------------------------------
@@ -455,6 +536,7 @@ class InvestigationResult(BaseModel):
     recommendation_status: Literal["drafted", "skipped_unjustified"] = Field(
         default="skipped_unjustified"
     )
+    remediation_history: list[RemediationAuditEvent] = Field(default_factory=list)
     sequence_assessment: SequenceAnalysisOutput = Field(default_factory=SequenceAnalysisOutput)
     potential_impact: list[str] = Field(default_factory=list)
     uncertainty_and_gaps: list[str] = Field(default_factory=list)

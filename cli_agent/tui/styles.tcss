@@ -317,3 +317,63 @@ Checkbox > .toggle--button {
     background: $fq-nav-selected;
     color: $fq-nav-selected-text;
 }
+
+/* HITL Remediation view controls & confirmation modals (semantic variables only). */
+#remediation-controls {
+    display: none;
+    height: auto;
+    margin-top: 1;
+}
+
+#remediation-controls-row1,
+#remediation-controls-row2 {
+    height: 3;
+    margin-top: 0;
+}
+
+#remediation-controls Button {
+    min-width: 12;
+}
+
+RemediationConfirmScreen,
+RollbackConfirmScreen,
+RejectReasonScreen {
+    align: center middle;
+    background: $fq-overlay;
+}
+
+#remediation-modal-box {
+    width: 78;
+    max-height: 34;
+    height: auto;
+    border: round $fq-border;
+    background: $fq-surface;
+    padding: 1 2;
+}
+
+#remediation-reject-box {
+    width: 58;
+    height: auto;
+    border: round $fq-border;
+    background: $fq-surface;
+    padding: 1 2;
+}
+
+#remediation-preview-scroll {
+    height: 12;
+    margin-top: 1;
+    border: solid $fq-border-dim;
+    background: $fq-surface;
+    scrollbar-size: 1 1;
+}
+
+#remediation-preview-log {
+    height: auto;
+    background: $fq-surface;
+    color: $fq-text;
+}
+
+#remediation-modal-actions {
+    height: 3;
+    margin-top: 1;
+}

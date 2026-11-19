@@ -181,18 +181,18 @@ async def test_settings_view_reports_live_configuration(tmp_path) -> None:
 
 
 async def test_each_view_has_its_own_heading_and_content(tmp_path) -> None:
-    """Phase 6: destinations no longer share one placeholder view-note."""
+    """Phase 6 + HITL Remediation: destinations no longer share one placeholder view-note."""
     service = build_service(tmp_path, FakeTransport())
     app = ForensIQApp(service=service, auto_probe=False)
     async with app.run_test(size=SIZE) as pilot:
         seen = set()
-        for key in ("1", "2", "3", "4", "5", "6"):
+        for key in ("1", "2", "3", "4", "5", "6", "7"):
             await pilot.press(key)
             await pilot.pause()
             note = note_text(app)
             assert "placeholder" not in note
             seen.add(note)
-        assert len(seen) == 6
+        assert len(seen) == 7
 
 
 # -- monitoring lifecycle ------------------------------------------------

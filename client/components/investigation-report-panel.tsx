@@ -51,6 +51,48 @@ const getEvidenceBadge = (kind?: string) => {
   }
 };
 
+const getRemediationTierBadge = (fixTier?: string, fixable?: boolean) => {
+  if (!fixable || fixTier === 'tier_3_advisory') {
+    return {
+      label: 'ADVISORY_ONLY',
+      className: 'text-gray-300 bg-gray-900/40 border-gray-600/60',
+    };
+  }
+  if (fixTier === 'tier_1_playbook') {
+    return {
+      label: 'TIER_1_PLAYBOOK',
+      className: 'text-cyan-300 bg-cyan-900/30 border-cyan-500/60',
+    };
+  }
+  if (fixTier === 'tier_2_config_diff') {
+    return {
+      label: 'TIER_2_CONFIG_DIFF',
+      className: 'text-blue-300 bg-blue-900/30 border-blue-500/60',
+    };
+  }
+  return {
+    label: 'ADVISORY_ONLY',
+    className: 'text-gray-300 bg-gray-900/40 border-gray-600/60',
+  };
+};
+
+const getExecutionStatusBadge = (status?: string) => {
+  switch ((status || 'pending_approval').toLowerCase()) {
+    case 'executed':
+      return 'text-green-300 bg-green-900/30 border-green-500/60';
+    case 'rolled_back':
+      return 'text-orange-300 bg-orange-900/30 border-orange-500/60';
+    case 'rejected':
+      return 'text-gray-300 bg-gray-900/40 border-gray-500/60';
+    case 'failed':
+      return 'text-red-300 bg-red-900/30 border-red-500/60';
+    case 'approved':
+      return 'text-cyan-300 bg-cyan-900/30 border-cyan-500/60';
+    default:
+      return 'text-yellow-300 bg-yellow-900/20 border-yellow-500/50';
+  }
+};
+
 type SectionTab =
   | 'findings'
   | 'knowledge'
@@ -91,6 +133,9 @@ const InvestigationReportPanel: React.FC<InvestigationReportPanelProps> = ({
   const iocs = Array.isArray(investigation.iocs) ? investigation.iocs : [];
   const timeline = Array.isArray(investigation.timeline) ? investigation.timeline : [];
   const recommendations = Array.isArray(investigation.recommendations) ? investigation.recommendations : [];
+  const remediationHistory = Array.isArray(investigation.remediation_history)
+    ? investigation.remediation_history
+    : [];
   const seqAssessment = investigation.sequence_assessment;
   const auditTrail = Array.isArray(investigation.audit_trail) ? investigation.audit_trail : [];
   const potentialImpact = Array.isArray(investigation.potential_impact) ? investigation.potential_impact : [];
@@ -561,30 +606,68 @@ const InvestigationReportPanel: React.FC<InvestigationReportPanelProps> = ({
             </p>
           ) : (
             <div className="space-y-3">
-              {recommendations.map((rec, idx) => (
-                <div key={rec.recommendation_id || idx} className="bg-black/60 border border-gray-700/60 p-3 text-xs space-y-1.5">
-                  <div className="flex flex-wrap items-center justify-between gap-2">
-                    <span className="font-bold text-white text-sm">{rec.title}</span>
-                    <div className="flex flex-wrap gap-2">
-                      <span className="px-2 py-0.5 border border-purple-500/50 text-purple-300 uppercase">
-                        {rec.priority}
-                      </span>
-                      <span className="px-2 py-0.5 border border-yellow-500/50 text-yellow-300 flex items-center gap-1">
-                        <CheckCircle2 className="h-3 w-3" />
-                        HUMAN_APPROVAL_REQUIRED · AUTO_EXEC: FALSE
-                      </span>
+              {recommendations.map((rec, idx) => {
+                const tierBadge = getRemediationTierBadge(rec.fix_tier, rec.fixable_via_tui);
+                const execStatus = rec.execution_status || 'pending_approval';
+                return (
+                  <div key={rec.recommendation_id || idx} className="bg-black/60 border border-gray-700/60 p-3 text-xs space-y-1.5">
+                    <div className="flex flex-wrap items-center justify-between gap-2">
+                      <span className="font-bold text-white text-sm">{rec.title}</span>
+                      <div className="flex flex-wrap gap-2">
+                        <span className="px-2 py-0.5 border border-purple-500/50 text-purple-300 uppercase">
+                          {rec.priority}
+                        </span>
+                        <span className={`px-2 py-0.5 border uppercase ${tierBadge.className}`}>
+                          {tierBadge.label}
+                        </span>
+                        {rec.fixable_via_tui && rec.playbook_id && rec.playbook_id !== 'manual_only' && (
+                          <span className="px-2 py-0.5 border border-cyan-500/50 text-cyan-300">
+                            TUI_PLAYBOOK: {rec.playbook_id}
+                          </span>
+                        )}
+                        <span className={`px-2 py-0.5 border uppercase ${getExecutionStatusBadge(execStatus)}`}>
+                          STATUS: {execStatus}
+                        </span>
+                        <span className="px-2 py-0.5 border border-yellow-500/50 text-yellow-300 flex items-center gap-1">
+                          <CheckCircle2 className="h-3 w-3" />
+                          HUMAN_APPROVAL_REQUIRED · AUTO_EXEC: FALSE
+                        </span>
+                      </div>
                     </div>
+                    <p className="text-cyan-300"><span className="font-semibold">Target:</span> {rec.target}</p>
+                    <p className="text-gray-200"><span className="font-semibold">Action:</span> {rec.action}</p>
+                    {rec.expected_effect && (
+                      <p className="text-green-300"><span className="font-semibold">Expected Effect:</span> {rec.expected_effect}</p>
+                    )}
+                    {rec.rollback_notes && (
+                      <p className="text-gray-400"><span className="font-semibold">Rollback:</span> {rec.rollback_notes}</p>
+                    )}
                   </div>
-                  <p className="text-cyan-300"><span className="font-semibold">Target:</span> {rec.target}</p>
-                  <p className="text-gray-200"><span className="font-semibold">Action:</span> {rec.action}</p>
-                  {rec.expected_effect && (
-                    <p className="text-green-300"><span className="font-semibold">Expected Effect:</span> {rec.expected_effect}</p>
-                  )}
-                  {rec.rollback_notes && (
-                    <p className="text-gray-400"><span className="font-semibold">Rollback:</span> {rec.rollback_notes}</p>
-                  )}
-                </div>
-              ))}
+                );
+              })}
+            </div>
+          )}
+          {remediationHistory.length > 0 && (
+            <div className="mt-4 pt-3 border-t border-purple-500/30 space-y-2">
+              <div className="text-xs font-semibold text-cyan-400">
+                [TUI_REMEDIATION_AUDIT_SYNC ({remediationHistory.length})]
+              </div>
+              <div className="space-y-1.5">
+                {remediationHistory.map((ev, idx) => (
+                  <div key={`${ev.recommendation_id}-${ev.recorded_at}-${idx}`} className="bg-black/60 border border-gray-800 p-2 text-[11px] flex flex-wrap items-center justify-between gap-2">
+                    <div className="flex flex-wrap items-center gap-2">
+                      <span className="text-white font-semibold">{ev.recommendation_id}</span>
+                      <span className={`px-1.5 py-0.5 border uppercase ${getExecutionStatusBadge(ev.execution_status)}`}>
+                        {ev.execution_status}
+                      </span>
+                      {ev.receipt_id && <span className="text-cyan-300">receipt: {ev.receipt_id}</span>}
+                      {ev.executed_by && <span className="text-gray-400">by: {ev.executed_by}</span>}
+                      {ev.notes && <span className="text-gray-300">({ev.notes})</span>}
+                    </div>
+                    <span className="text-gray-500">{ev.recorded_at}</span>
+                  </div>
+                ))}
+              </div>
             </div>
           )}
         </div>
