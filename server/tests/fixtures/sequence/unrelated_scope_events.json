@@ -1,0 +1,23 @@
+[
+  {
+    "schema_version": "1.0",
+    "event_id": "evt-1302",
+    "scope_key": "host:server-04|account:svc-backup",
+    "event_time": "2026-11-19T09:20:00Z",
+    "event_type": "privilege_escalation",
+    "source": "linux-audit",
+    "features": {
+      "host": "server-04",
+      "account": "svc-backup",
+      "process": "/usr/bin/systemctl",
+      "outcome": "success"
+    },
+    "evidence_ref": {
+      "reference_id": "evidence-audit-1302",
+      "uri": "s3://forensiq-evidence/server-04/audit.log",
+      "line_start": 12,
+      "line_end": 12,
+      "sha256": "3123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef"
+    }
+  }
+]

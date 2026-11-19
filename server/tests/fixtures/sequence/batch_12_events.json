@@ -1,0 +1,44 @@
+[
+  {
+    "schema_version": "1.0",
+    "event_id": "evt-1201",
+    "scope_key": "host:workstation-17|account:alex",
+    "event_time": "2026-11-19T09:15:00Z",
+    "event_type": "authentication_failure",
+    "source": "linux-auth",
+    "features": {
+      "host": "workstation-17",
+      "account": "alex",
+      "outcome": "failure",
+      "remote_ip": "203.0.113.25"
+    },
+    "evidence_ref": {
+      "reference_id": "evidence-auth-1201",
+      "uri": "s3://forensiq-evidence/workstation-17/auth.log",
+      "line_start": 121,
+      "line_end": 121,
+      "sha256": "0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef"
+    }
+  },
+  {
+    "schema_version": "1.0",
+    "event_id": "evt-1202",
+    "scope_key": "host:workstation-17|account:alex",
+    "event_time": "2026-11-19T09:16:00Z",
+    "event_type": "authentication_failure",
+    "source": "linux-auth",
+    "features": {
+      "host": "workstation-17",
+      "account": "alex",
+      "outcome": "failure",
+      "remote_ip": "203.0.113.25"
+    },
+    "evidence_ref": {
+      "reference_id": "evidence-auth-1202",
+      "uri": "s3://forensiq-evidence/workstation-17/auth.log",
+      "line_start": 138,
+      "line_end": 138,
+      "sha256": "1123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef"
+    }
+  }
+]

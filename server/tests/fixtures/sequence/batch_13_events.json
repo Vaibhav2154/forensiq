@@ -1,0 +1,23 @@
+[
+  {
+    "schema_version": "1.0",
+    "event_id": "evt-1301",
+    "scope_key": "host:workstation-17|account:alex",
+    "event_time": "2026-11-19T09:20:00Z",
+    "event_type": "privilege_escalation",
+    "source": "linux-audit",
+    "features": {
+      "host": "workstation-17",
+      "account": "alex",
+      "process": "/usr/bin/sudo",
+      "outcome": "success"
+    },
+    "evidence_ref": {
+      "reference_id": "evidence-audit-1301",
+      "uri": "s3://forensiq-evidence/workstation-17/audit.log",
+      "line_start": 44,
+      "line_end": 44,
+      "sha256": "2123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef"
+    }
+  }
+]
