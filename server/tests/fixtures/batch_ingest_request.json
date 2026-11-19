@@ -1,0 +1,24 @@
+{
+  "schema_version": "1.0",
+  "batch_id": "batch-0012",
+  "source": "cli-agent:workstation-17",
+  "records": [
+    {
+      "record_id": "raw-0001",
+      "observed_at": "2026-11-19T09:15:00Z",
+      "message": "Failed password for alex from 203.0.113.25",
+      "source_type": "linux-auth",
+      "evidence_ref": {
+        "reference_id": "evidence-auth-0001",
+        "uri": "s3://forensiq-evidence/workstation-17/auth.log",
+        "line_start": 121,
+        "line_end": 121,
+        "sha256": "0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef"
+      },
+      "metadata": {
+        "host": "workstation-17"
+      }
+    }
+  ],
+  "sent_at": "2026-11-19T09:16:00Z"
+}

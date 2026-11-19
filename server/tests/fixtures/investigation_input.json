@@ -1,0 +1,57 @@
+{
+  "schema_version": "1.0",
+  "investigation_id": "inv-0001",
+  "normalized_events": [
+    {
+      "schema_version": "1.0",
+      "event_id": "evt-0001",
+      "scope_key": "host:workstation-17|account:alex",
+      "event_time": "2026-11-19T09:15:00Z",
+      "event_type": "authentication_failure",
+      "source": "linux-auth",
+      "features": {
+        "host": "workstation-17",
+        "account": "alex",
+        "outcome": "failure"
+      },
+      "evidence_ref": {
+        "reference_id": "evidence-auth-0001",
+        "uri": "s3://forensiq-evidence/workstation-17/auth.log",
+        "line_start": 121,
+        "line_end": 121,
+        "sha256": "0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef"
+      }
+    }
+  ],
+  "knowledge_records": [
+    {
+      "schema_version": "1.0",
+      "record_id": "okf-mitre-t1110",
+      "source_type": "mitre_attack",
+      "source_id": "T1110",
+      "source_version": "17.1",
+      "content": {
+        "name": "Brute Force"
+      },
+      "relationships": [],
+      "provenance": {
+        "source_uri": "https://attack.mitre.org/techniques/T1110/"
+      },
+      "ingested_at": "2026-11-19T09:00:00Z"
+    }
+  ],
+  "sequence_cues": [
+    {
+      "schema_version": "1.0",
+      "cue_id": "cue-0001",
+      "scope_key": "host:workstation-17|account:alex",
+      "event_ids": ["evt-0001"],
+      "risk_score": 0.87,
+      "threshold": 0.75,
+      "model_version": "lstm-sequence-v0.1",
+      "window_ref": "window:host-workstation-17:2026-11-19T09:00:00Z",
+      "created_at": "2026-11-19T09:20:00Z"
+    }
+  ],
+  "created_at": "2026-11-19T09:21:00Z"
+}
