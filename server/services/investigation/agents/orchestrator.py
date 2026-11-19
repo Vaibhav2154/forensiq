@@ -10,6 +10,7 @@ from datetime import datetime, timezone
 from typing import Any, Literal
 
 from services.investigation.guardrails import (
+    build_record_to_source_map,
     build_verified_source_ids,
     sanitize_attack_path,
     sanitize_enriched_knowledge,
@@ -335,6 +336,7 @@ def make_orchestrator_synthesize_node(llm_factory: GeminiAgentFactory):
         scores = state.get("knowledge_scores") or {}
         related_map = state.get("related_knowledge_map") or {}
         valid_source_ids = build_verified_source_ids(catalog, related_map)
+        record_to_source = build_record_to_source_map(catalog, related_map)
 
         event_analysis = state.get("event_analysis")
         knowledge_enrichment = state.get("knowledge_enrichment")
@@ -356,6 +358,7 @@ def make_orchestrator_synthesize_node(llm_factory: GeminiAgentFactory):
             attack_path=attack_path,
             valid_event_ids=valid_event_ids,
             valid_source_ids=valid_source_ids,
+            record_to_source=record_to_source,
         )
 
         # 2. Orchestrator LLM synthesis over verified components
@@ -396,6 +399,7 @@ def make_orchestrator_synthesize_node(llm_factory: GeminiAgentFactory):
             draft=draft,
             event_index=event_index,
             valid_source_ids=valid_source_ids,
+            record_to_source=record_to_source,
         )
         valid_finding_ids = {f.finding_id for f in sanitized_findings}
         sanitized_recs = sanitize_recommendations(
@@ -403,6 +407,7 @@ def make_orchestrator_synthesize_node(llm_factory: GeminiAgentFactory):
             valid_event_ids=valid_event_ids,
             valid_finding_ids=valid_finding_ids,
             valid_source_ids=valid_source_ids,
+            record_to_source=record_to_source,
         )
 
         # Combine uncertainty & telemetry gaps cleanly

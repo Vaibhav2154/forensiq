@@ -198,7 +198,7 @@ async def search_techniques(query: str, max_results: int = 5) -> Dict[str, Any]:
             KnowledgeSearchQuery(
                 query=query,
                 source_type="mitre_attack",
-                kind="technique",
+                kind="attack-pattern",
                 top_k=max_results,
                 search_mode="auto",
             )
@@ -232,7 +232,7 @@ async def get_database_stats() -> Dict[str, Any]:
         
         stats = await knowledge_service.stats()
         return {
-            "total_techniques": stats.counts_by_kind.get("technique", stats.total_records),
+            "total_techniques": stats.counts_by_kind.get("attack-pattern", stats.total_records),
             "total_records": stats.total_records,
             "collection_name": f"okf-{stats.backend}",
             "embedding_model": knowledge_service.settings.embedding_model,

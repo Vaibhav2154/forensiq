@@ -6,6 +6,7 @@ from datetime import datetime, timezone
 
 from contracts import EvidenceReference, KnowledgeRecord, NormalizedEvent
 from services.investigation.guardrails import (
+    build_record_to_source_map,
     build_verified_source_ids,
     render_attack_path_mermaid,
     sanitize_attack_path,
@@ -207,7 +208,8 @@ def test_guardrails_catch_and_strip_hallucinated_t1078_004() -> None:
     assert "[MISSING EVIDENCE]" in sanitized_ap.mermaid_diagram
     assert any("T1078.004" in w for w in ap_warn)
 
-    # Findings & recommendation guardrails
+    # Findings & recommendation guardrails (including OKF record_id -> canonical source_id normalization)
+    record_map = build_record_to_source_map(catalog)
     draft = FinalSynthesisDraft(
         overall_threat_level="high",
         overall_confidence="high",
@@ -221,11 +223,11 @@ def test_guardrails_catch_and_strip_hallucinated_t1078_004() -> None:
                 observed_facts=["evt-0001 failed login"],
                 inferences=["Possible credential compromise"],
                 supporting_event_ids=["evt-0001", "evt-fake"],
-                knowledge_source_ids=["T1021.004", "T1078.004"],
+                knowledge_source_ids=["okf-mitre-t1021.004", "T1078.004"],
             )
         ],
     )
-    clean_findings, f_warn = sanitize_findings(draft, events, valid_ids)
+    clean_findings, f_warn = sanitize_findings(draft, events, valid_ids, record_map)
     assert clean_findings[0].supporting_event_ids == ["evt-0001"]
     assert clean_findings[0].evidence_ref_ids == ["ev-0001"]
     assert clean_findings[0].knowledge_source_ids == ["T1021.004"]

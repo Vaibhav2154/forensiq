@@ -52,6 +52,45 @@ def build_verified_source_ids(
     return valid
 
 
+def build_record_to_source_map(
+    knowledge_catalog: dict[str, KnowledgeRecord],
+    related_knowledge_map: dict[str, list[KnowledgeRecord]] | None = None,
+) -> dict[str, str]:
+    """Map verified OKF ``record_id`` and ``source_id`` variants (lowercased) to canonical ``source_id``."""
+    mapping: dict[str, str] = {}
+    for rec in knowledge_catalog.values():
+        canonical = rec.source_id.upper()
+        mapping[rec.source_id.lower()] = canonical
+        mapping[rec.record_id.lower()] = canonical
+        for rel in rec.relationships:
+            mapping[rel.target_source_id.lower()] = rel.target_source_id.upper()
+    if related_knowledge_map:
+        for rel_list in related_knowledge_map.values():
+            for rel_rec in rel_list:
+                canonical = rel_rec.source_id.upper()
+                mapping[rel_rec.source_id.lower()] = canonical
+                mapping[rel_rec.record_id.lower()] = canonical
+    return mapping
+
+
+def _resolve_verified_id(
+    candidate: str,
+    valid_source_ids: set[str],
+    record_to_source: dict[str, str] | None = None,
+) -> str | None:
+    """Resolve a candidate source_id or record_id to its canonical uppercase source_id if verified."""
+    cleaned = candidate.strip()
+    if not cleaned:
+        return None
+    if cleaned.upper() in valid_source_ids:
+        return cleaned.upper()
+    if record_to_source:
+        resolved = record_to_source.get(cleaned.lower())
+        if resolved and resolved in valid_source_ids:
+            return resolved
+    return None
+
+
 def build_evidence_ref_ids(event_index: dict[str, NormalizedEvent]) -> set[str]:
     """Collect every valid EvidenceReference.reference_id from the indexed normalized events."""
     return {evt.evidence_ref.reference_id for evt in event_index.values()}
@@ -332,6 +371,7 @@ def sanitize_attack_path(
     attack_path: AttackPathOutput | None,
     valid_event_ids: set[str],
     valid_source_ids: set[str],
+    record_to_source: dict[str, str] | None = None,
 ) -> tuple[AttackPathOutput, list[str]]:
     """Enforce verified IDs and observed-vs-inferred integrity on AttackPathOutput."""
     if attack_path is None:
@@ -343,12 +383,14 @@ def sanitize_attack_path(
         clean_evts = [eid for eid in _dedupe_preserve(node.event_ids) if eid in valid_event_ids]
         clean_kids = []
         for kid in _dedupe_preserve(node.knowledge_source_ids):
-            if kid.upper() in valid_source_ids:
-                clean_kids.append(kid.upper())
+            resolved = _resolve_verified_id(kid, valid_source_ids, record_to_source)
+            if resolved:
+                clean_kids.append(resolved)
             else:
                 warnings.append(
                     f"Stripped unverified ID {kid!r} from attack-path node {node.node_id!r}."
                 )
+        clean_kids = _dedupe_preserve(clean_kids)
         status = node.status
         if status == "observed" and not clean_evts:
             status = "inferred"
@@ -393,6 +435,7 @@ def sanitize_findings(
     draft: FinalSynthesisDraft,
     event_index: dict[str, NormalizedEvent],
     valid_source_ids: set[str],
+    record_to_source: dict[str, str] | None = None,
 ) -> tuple[list[InvestigationFinding], list[str]]:
     """Ensure every finding cites only verified event_ids, evidence_ref_ids, and OKF IDs."""
     warnings: list[str] = []
@@ -410,8 +453,9 @@ def sanitize_findings(
         )
         clean_kids: list[str] = []
         for kid in _dedupe_preserve(finding.knowledge_source_ids):
-            if kid.upper() in valid_source_ids:
-                clean_kids.append(kid.upper())
+            resolved = _resolve_verified_id(kid, valid_source_ids, record_to_source)
+            if resolved:
+                clean_kids.append(resolved)
             else:
                 warnings.append(
                     f"Stripped unverified ID {kid!r} from finding {finding.finding_id!r}."
@@ -421,7 +465,7 @@ def sanitize_findings(
                 update={
                     "supporting_event_ids": clean_evts,
                     "evidence_ref_ids": clean_refs,
-                    "knowledge_source_ids": clean_kids,
+                    "knowledge_source_ids": _dedupe_preserve(clean_kids),
                 }
             )
         )
@@ -434,6 +478,7 @@ def sanitize_recommendations(
     valid_event_ids: set[str],
     valid_finding_ids: set[str],
     valid_source_ids: set[str],
+    record_to_source: dict[str, str] | None = None,
 ) -> list[RecommendationItem]:
     """Enforce approval gates and valid references on every RecommendationItem."""
     if recommendations_output is None or recommendations_output.status != "drafted":
@@ -441,6 +486,11 @@ def sanitize_recommendations(
 
     cleaned: list[RecommendationItem] = []
     for rec in recommendations_output.recommendations:
+        resolved_mits = []
+        for mid in _dedupe_preserve(rec.knowledge_mitigation_ids):
+            resolved = _resolve_verified_id(mid, valid_source_ids, record_to_source)
+            if resolved:
+                resolved_mits.append(resolved)
         cleaned.append(
             RecommendationItem(
                 recommendation_id=rec.recommendation_id,
@@ -457,11 +507,7 @@ def sanitize_recommendations(
                 evidence_event_ids=[
                     eid for eid in _dedupe_preserve(rec.evidence_event_ids) if eid in valid_event_ids
                 ],
-                knowledge_mitigation_ids=[
-                    mid.upper()
-                    for mid in _dedupe_preserve(rec.knowledge_mitigation_ids)
-                    if mid.upper() in valid_source_ids
-                ],
+                knowledge_mitigation_ids=_dedupe_preserve(resolved_mits),
                 requires_human_approval=True,
                 auto_executable=False,
                 rollback_notes=rec.rollback_notes,

@@ -95,7 +95,7 @@ async def search_mitre_techniques(request: MitreSearchRequest):
             KnowledgeSearchQuery(
                 query=request.query,
                 source_type="mitre_attack",
-                kind="technique",
+                kind="attack-pattern",
                 top_k=request.max_results or 5,
                 search_mode="auto",
             )
@@ -144,7 +144,7 @@ async def get_all_tactics():
             )
 
         records = await knowledge_service.list_records(
-            source_type="mitre_attack", kind="technique", limit=2000, offset=0
+            source_type="mitre_attack", kind="attack-pattern", limit=2000, offset=0
         )
         all_tactics = set()
         for rec in records:
@@ -180,7 +180,7 @@ async def get_all_platforms():
             )
 
         records = await knowledge_service.list_records(
-            source_type="mitre_attack", kind="technique", limit=2000, offset=0
+            source_type="mitre_attack", kind="attack-pattern", limit=2000, offset=0
         )
         all_platforms = set()
         for rec in records:
@@ -217,7 +217,7 @@ async def get_mitre_stats():
         
         stats = await knowledge_service.stats()
         return {
-            "total_techniques": stats.counts_by_kind.get("technique", stats.total_records),
+            "total_techniques": stats.counts_by_kind.get("attack-pattern", stats.total_records),
             "total_records": stats.total_records,
             "collection_name": f"okf-{stats.backend}",
             "embedding_model": knowledge_service.settings.embedding_model,
@@ -252,7 +252,7 @@ async def get_all_techniques(
 
         records = await knowledge_service.list_records(
             source_type="mitre_attack",
-            kind="technique",
+            kind="attack-pattern",
             limit=limit,
             offset=offset,
         )
@@ -305,7 +305,7 @@ async def rag_mitre_query(request: RagQueryRequest):
             KnowledgeSearchQuery(
                 query=request.query,
                 source_type="mitre_attack",
-                kind="technique",
+                kind="attack-pattern",
                 top_k=request.max_context_techniques or 5,
                 search_mode="auto",
             )
