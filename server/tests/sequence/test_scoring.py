@@ -130,6 +130,54 @@ class LstmCellScorerTests(unittest.TestCase):
         with self.assertRaises(ScoringError):
             scorer.step(LstmState(hidden=(0.0,), cell=(0.0,)), self._observation())
 
+    def test_mismatched_gate_column_count_is_rejected(self) -> None:
+        with self.assertRaises(ScoringError):
+            LstmCellScorer(
+                {
+                    "w_i": [[0.1, 0.2]],
+                    "w_f": [[0.1]],
+                    "w_o": [[0.1, 0.0]],
+                    "w_g": [[0.1, 0.0]],
+                    "u_i": [[0.1]],
+                    "u_f": [[0.1]],
+                    "u_o": [[0.1]],
+                    "u_g": [[0.1]],
+                    "b_i": [0.0],
+                    "b_f": [0.0],
+                    "b_o": [0.0],
+                    "b_g": [0.0],
+                    "w_out": [0.5],
+                    "b_out": 0.0,
+                },
+                vectorise=lambda observation: [1.0, 2.0],
+            )
+
+    def test_non_finite_or_boolean_weights_and_state_are_rejected(self) -> None:
+        with self.assertRaises(ScoringError):
+            LstmState.from_dict({"hidden": "not-a-list", "cell": [0.0]})
+        with self.assertRaises(ScoringError):
+            LstmState.from_dict({"hidden": [float("nan")], "cell": [0.0]})
+        with self.assertRaises(ScoringError):
+            LstmCellScorer(
+                {
+                    "w_i": [[float("nan")]],
+                    "w_f": [[0.1]],
+                    "w_o": [[0.1]],
+                    "w_g": [[0.1]],
+                    "u_i": [[0.1]],
+                    "u_f": [[0.1]],
+                    "u_o": [[0.1]],
+                    "u_g": [[0.1]],
+                    "b_i": [0.0],
+                    "b_f": [0.0],
+                    "b_o": [0.0],
+                    "b_g": [0.0],
+                    "w_out": [0.5],
+                    "b_out": 0.0,
+                },
+                vectorise=lambda observation: [1.0],
+            )
+
 
 if __name__ == "__main__":
     unittest.main()

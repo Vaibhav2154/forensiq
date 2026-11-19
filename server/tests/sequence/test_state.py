@@ -2,11 +2,15 @@
 
 from __future__ import annotations
 
+import sqlite3
+import tempfile
 import unittest
+from pathlib import Path
 
 from services.sequence import (
     InMemoryStateStore,
     ScopeState,
+    SQLiteStateStore,
     SequenceEngine,
     StateCorruptionError,
 )
@@ -102,6 +106,16 @@ class StateSerializationTests(unittest.TestCase):
                 }
             )
 
+        corrupt_lstm_payload = self._state().to_dict()
+        corrupt_lstm_payload["entries"][0]["state_before"]["hidden"] = "corrupted"
+        with self.assertRaises(StateCorruptionError):
+            ScopeState.from_dict(corrupt_lstm_payload)
+
+        naive_ts_payload = self._state().to_dict()
+        naive_ts_payload["last_event_time"] = "2026-11-19T09:16:00"
+        with self.assertRaises(StateCorruptionError):
+            ScopeState.from_dict(naive_ts_payload)
+
 
 class StateRestorationTests(unittest.TestCase):
     def test_state_is_restored_by_a_new_engine_from_the_same_store(self) -> None:
@@ -150,6 +164,51 @@ class StateRestorationTests(unittest.TestCase):
         self.assertEqual(other_state.scope_key, OTHER_SCOPE)
         self.assertEqual(main_state.last_event_time, at(9, 0))
         self.assertEqual(other_state.last_event_time, at(9, 1))
+
+
+class SQLiteStateStoreTests(unittest.TestCase):
+    def test_persists_across_reopen_and_resets_corrupt_rows(self) -> None:
+        with tempfile.TemporaryDirectory() as tmpdir:
+            db_path = Path(tmpdir) / "seq_state.sqlite3"
+            store1 = SQLiteStateStore(db_path)
+            engine1 = SequenceEngine(
+                make_config(), ScriptedCueScorer(), store=store1, clock=fixed_clock
+            )
+            engine1.process_batch(load_fixture("batch_12_events.json"))
+            store1.close()
+
+            store2 = SQLiteStateStore(db_path)
+            engine2 = SequenceEngine(
+                make_config(), ScriptedCueScorer(), store=store2, clock=fixed_clock
+            )
+            result = engine2.process_batch(load_fixture("batch_13_events.json"))
+            self.assertEqual(len(result.cues), 1)
+            self.assertEqual(
+                result.cues[0].event_ids, ["evt-1201", "evt-1202", "evt-1301"]
+            )
+            store2.close()
+
+            # Directly corrupt JSON in SQLite row and ensure engine recovers cleanly
+            raw_conn = sqlite3.connect(str(db_path))
+            raw_conn.execute(
+                "UPDATE sequence_scope_state SET state_json = ? WHERE scope_key = ?",
+                ("{not-valid-json", DEFAULT_SCOPE),
+            )
+            raw_conn.commit()
+            raw_conn.close()
+
+            store3 = SQLiteStateStore(db_path)
+            engine3 = SequenceEngine(
+                make_config(), ScriptedCueScorer(), store=store3, clock=fixed_clock
+            )
+            recovered = engine3.process_batch(load_fixture("batch_13_events.json"))
+            self.assertEqual(recovered.reset_scope_keys, [DEFAULT_SCOPE])
+            self.assertEqual(recovered.cues, [])
+            restored_state = engine3.state_for(DEFAULT_SCOPE)
+            assert restored_state is not None
+            self.assertEqual(restored_state.reset_reason, "corrupted-state")
+            self.assertEqual(restored_state.event_ids, ["evt-1301"])
+            store3.close()
 
 
 if __name__ == "__main__":

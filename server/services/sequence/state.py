@@ -26,7 +26,7 @@ from dataclasses import dataclass, field
 from datetime import datetime
 from typing import Any, Iterable, Mapping, Protocol, runtime_checkable
 
-from .errors import StateCorruptionError
+from .errors import ScoringError, StateCorruptionError
 from .scoring import LstmState
 from .window import WindowEntry, window_event_ids
 
@@ -103,14 +103,20 @@ class ScopeState:
                 raise StateCorruptionError(
                     f"state format version {version} is not {STATE_FORMAT_VERSION}"
                 )
-            last_event_time = data.get("last_event_time")
+            raw_last_event_time = data.get("last_event_time")
+            parsed_last_event_time = (
+                datetime.fromisoformat(raw_last_event_time) if raw_last_event_time else None
+            )
+            if parsed_last_event_time is not None and (
+                parsed_last_event_time.tzinfo is None
+                or parsed_last_event_time.utcoffset() is None
+            ):
+                raise StateCorruptionError("last_event_time must be timezone-aware")
             return cls(
                 scope_key=str(data["scope_key"]),
                 model_version=str(data["model_version"]),
                 entries=[WindowEntry.from_dict(item) for item in data.get("entries", [])],
-                last_event_time=(
-                    datetime.fromisoformat(last_event_time) if last_event_time else None
-                ),
+                last_event_time=parsed_last_event_time,
                 trimmed=bool(data.get("trimmed", False)),
                 replay_incomplete=bool(data.get("replay_incomplete", False)),
                 reset_reason=data.get("reset_reason"),
@@ -118,7 +124,7 @@ class ScopeState:
             )
         except StateCorruptionError:
             raise
-        except (KeyError, TypeError, ValueError) as exc:
+        except (KeyError, TypeError, ValueError, ScoringError) as exc:
             raise StateCorruptionError(f"invalid scope state: {exc}") from exc
 
 

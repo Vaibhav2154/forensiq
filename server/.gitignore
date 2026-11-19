@@ -179,3 +179,4 @@ cython_debug/
 chroma_db/
 .forensiq_knowledge/
 .cognee_system/
+.forensiq_sequence/

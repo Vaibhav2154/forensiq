@@ -87,6 +87,7 @@ class EventObservation:
     event_type_occurrences_in_window: int
     first_event_type_occurrence_in_window: bool
     context_presence: Mapping[str, bool]
+    severity_label: str | None = None
 
     def to_dict(self) -> dict[str, Any]:
         return {
@@ -96,6 +97,7 @@ class EventObservation:
             "source": self.source,
             "outcome": self.outcome,
             "severity": self.severity,
+            "severity_label": self.severity_label,
             "time_since_previous_seconds": self.time_since_previous_seconds,
             "window_event_count": self.window_event_count,
             "event_type_occurrences_in_window": self.event_type_occurrences_in_window,
@@ -119,6 +121,7 @@ class EventObservation:
                 data["first_event_type_occurrence_in_window"]
             ),
             context_presence={k: bool(v) for k, v in dict(data["context_presence"]).items()},
+            severity_label=data.get("severity_label"),
         )
 
 
@@ -152,6 +155,12 @@ class FeatureExtractor:
         occurrences = sum(
             1 for observation in window_observations if observation.event_type == event.event_type
         )
+        raw_sev = features.get("severity")
+        severity_label = (
+            raw_sev.strip().lower()
+            if isinstance(raw_sev, str) and raw_sev.strip()
+            else None
+        )
 
         return EventObservation(
             event_id=event.event_id,
@@ -159,10 +168,11 @@ class FeatureExtractor:
             event_type=event.event_type,
             source=event.source,
             outcome=_as_str(features.get("outcome")),
-            severity=_as_float(features.get("severity")),
+            severity=_as_float(raw_sev),
             time_since_previous_seconds=delta,
             window_event_count=len(window_observations) + 1,
             event_type_occurrences_in_window=occurrences,
             first_event_type_occurrence_in_window=occurrences == 0,
             context_presence={key: _is_present(features.get(key)) for key in CONTEXT_FEATURE_KEYS},
+            severity_label=severity_label,
         )
