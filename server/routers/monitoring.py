@@ -106,12 +106,9 @@ async def get_monitoring_sessions(
     try:
         username = current_user.get('username')
         
-        if active_only:
-            sessions = await storage_service.get_active_sessions(username)
-        else:
-            # For now, only return active sessions
-            # Can be extended to include historical sessions
-            sessions = await storage_service.get_active_sessions(username)
+        sessions = await storage_service.get_user_sessions(
+            username, active_only=active_only
+        )
         
         return sessions
         

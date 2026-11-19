@@ -243,14 +243,16 @@ class AnalysisStorageService:
             logger.error(f"Failed to stop monitoring session {session_id}: {e}")
             return False
     
-    async def get_active_sessions(self, username: str) -> List[Dict[str, Any]]:
-        """Get active monitoring sessions for user."""
+    async def get_user_sessions(
+        self, username: str, active_only: bool = True
+    ) -> List[Dict[str, Any]]:
+        """Get monitoring sessions for user (active only or all sessions)."""
         try:
-            cursor = self.sessions_collection.find({
-                "username": username,
-                "status": "active"
-            }).sort("created_at", -1)
-            
+            query: Dict[str, Any] = {"username": username}
+            if active_only:
+                query["status"] = "active"
+            cursor = self.sessions_collection.find(query).sort("created_at", -1)
+
             sessions = []
             async for doc in cursor:
                 sessions.append({
@@ -260,13 +262,18 @@ class AnalysisStorageService:
                     "ai_agent_enabled": doc.get("ai_agent_enabled", True),
                     "status": doc.get("status"),
                     "created_at": self.convert_datetime_to_string(doc.get("created_at")),
-                    "last_checked": self.convert_datetime_to_string(doc.get("last_checked"))
+                    "last_checked": self.convert_datetime_to_string(doc.get("last_checked")),
+                    "stopped_at": self.convert_datetime_to_string(doc.get("stopped_at")),
                 })
-            
+
             return sessions
         except Exception as e:
-            logger.error(f"Failed to get active sessions: {e}")
+            logger.error(f"Failed to get monitoring sessions: {e}")
             return []
+
+    async def get_active_sessions(self, username: str) -> List[Dict[str, Any]]:
+        """Get active monitoring sessions for user."""
+        return await self.get_user_sessions(username, active_only=True)
     
     async def get_monitoring_session(self, session_id: str) -> Optional[Dict[str, Any]]:
         """Get specific monitoring session."""
@@ -338,5 +345,93 @@ class AnalysisStorageService:
         except Exception as e:
             logger.error(f"Failed to delete analysis {analysis_id}: {e}")
             return False
+
+    async def get_user_analytics(self, user_id: str) -> Dict[str, Any]:
+        """Compute user analytics stats matching UserAnalyticsStats."""
+        try:
+            cursor = self.collection.find({"user_id": user_id}).sort("analysis_timestamp", -1)
+            total_analyses = 0
+            total_processing_time = 0.0
+            timeline_map: Dict[str, Dict[str, Any]] = {}
+            recent_docs: List[Dict[str, Any]] = []
+
+            async for doc in cursor:
+                total_analyses += 1
+                total_processing_time += float(doc.get("processing_time_ms") or 0.0)
+                ts = doc.get("analysis_timestamp")
+                if isinstance(ts, datetime):
+                    date_key = ts.strftime("%Y-%m-%d")
+                elif isinstance(ts, str) and len(ts) >= 10:
+                    date_key = ts[:10]
+                else:
+                    date_key = "unknown"
+
+                if date_key not in timeline_map:
+                    timeline_map[date_key] = {
+                        "date": date_key,
+                        "count": 0,
+                        "techniques_count": 0,
+                    }
+                timeline_map[date_key]["count"] += 1
+                timeline_map[date_key]["techniques_count"] += int(
+                    doc.get("techniques_count") or 0
+                )
+
+                if len(recent_docs) < 50:
+                    recent_docs.append(doc)
+
+            technique_counts: Dict[tuple[str, str], int] = {}
+            if recent_docs:
+                user_doc = await database.get_collection("user_collection").find_one(
+                    {"username": user_id}
+                )
+                hashed_password = user_doc.get("hashed_password") if user_doc else None
+                if hashed_password:
+                    for doc in recent_docs:
+                        enc_tech = doc.get("encrypted_techniques")
+                        if not enc_tech:
+                            continue
+                        decrypted = encryption_service.decrypt_analysis_results(
+                            encrypted_data={"techniques": enc_tech},
+                            hashed_password=hashed_password,
+                        )
+                        for tech in decrypted.get("techniques") or []:
+                            if not isinstance(tech, dict):
+                                continue
+                            tid = str(tech.get("technique_id") or "").strip()
+                            tname = str(tech.get("name") or tid).strip()
+                            if tid:
+                                key = (tid, tname)
+                                technique_counts[key] = technique_counts.get(key, 0) + 1
+
+            most_common_techniques = [
+                {"technique_id": tid, "name": tname, "count": count}
+                for (tid, tname), count in sorted(
+                    technique_counts.items(),
+                    key=lambda item: (-item[1], item[0][0]),
+                )[:10]
+            ]
+            analysis_timeline = sorted(
+                timeline_map.values(), key=lambda entry: entry["date"]
+            )
+
+            return {
+                "total_analyses": total_analyses,
+                "avg_processing_time": (
+                    round(total_processing_time / total_analyses, 2)
+                    if total_analyses > 0
+                    else 0.0
+                ),
+                "most_common_techniques": most_common_techniques,
+                "analysis_timeline": analysis_timeline,
+            }
+        except Exception as e:
+            logger.error(f"Failed to compute user analytics for {user_id}: {e}")
+            return {
+                "total_analyses": 0,
+                "avg_processing_time": 0.0,
+                "most_common_techniques": [],
+                "analysis_timeline": [],
+            }
 
 analysis_storage_service = AnalysisStorageService()
