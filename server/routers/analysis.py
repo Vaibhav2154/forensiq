@@ -1,11 +1,15 @@
 from fastapi import APIRouter, HTTPException, Depends
 from typing import Dict, Any, List
+from datetime import datetime, timezone
+import hashlib
 import time
+import uuid
+from contracts import BatchIngestRequest, EvidenceReference, RawLogRecord
 from model.logs_model import LogAnalysisRequest, LogAnalysisResponse, AttackTechnique
 from model.analysis_model import AnalysisHistoryItem, UserAnalyticsStats
-from services import GeminiService, ChromaDBService
+from services import GeminiService
+from services.knowledge import KnowledgeSearchQuery, KnowledgeService
 from services.analysis_storage_service import analysis_storage_service
-from services.mitre_validation_service import mitre_validation_service
 from routers.auth import get_current_user
 from core import logger
 
@@ -13,42 +17,105 @@ router = APIRouter(prefix="/api/v1", tags=["Log Analysis"])
 
 # Global service instances (will be initialized in main app)
 gemini_service: GeminiService = None
-chromadb_service: ChromaDBService = None
+knowledge_service: KnowledgeService = None
 
-def set_services(gemini: GeminiService, chromadb: ChromaDBService):
+def set_services(gemini: GeminiService, knowledge: KnowledgeService):
     """Set service instances for the router."""
-    global gemini_service, chromadb_service
+    global gemini_service, knowledge_service
     gemini_service = gemini
-    chromadb_service = chromadb
+    knowledge_service = knowledge
+
+
+def _build_batch_from_raw_logs(raw_logs: str, username: str) -> BatchIngestRequest:
+    """Wrap raw log text into a traceable BatchIngestRequest for KCP normalization."""
+    now = datetime.now(timezone.utc)
+    batch_id = f"batch-{uuid.uuid4().hex[:12]}"
+    raw_lines = [line for line in raw_logs.splitlines() if line.strip()]
+    if not raw_lines:
+        raw_lines = [raw_logs.strip() or "(empty)"]
+
+    records: list[RawLogRecord] = []
+    for idx, line in enumerate(raw_lines, start=1):
+        line_hash = hashlib.sha256(line.encode("utf-8")).hexdigest()
+        records.append(
+            RawLogRecord(
+                record_id=f"raw-{batch_id}-{idx:04d}",
+                observed_at=now,
+                message=line,
+                source_type="api-analyze",
+                evidence_ref=EvidenceReference(
+                    reference_id=f"ev-{batch_id}-{idx:04d}",
+                    uri=f"api://analyze/{username}/{batch_id}",
+                    line_start=idx,
+                    line_end=idx,
+                    sha256=line_hash,
+                ),
+                metadata={"submitted_by": username},
+            )
+        )
+
+    return BatchIngestRequest(
+        batch_id=batch_id,
+        source=f"api:{username}",
+        records=records,
+        sent_at=now,
+    )
+
+
+def _hit_to_technique_dict(hit) -> Dict[str, Any]:
+    """Convert an OKF KnowledgeSearchHit to the AttackTechnique dictionary shape."""
+    rec = hit.record
+    content = rec.content or {}
+    tactics = content.get("tactics") or []
+    if isinstance(tactics, str):
+        tactics = [t.strip() for t in tactics.split(",") if t.strip()]
+    platforms = content.get("platforms") or []
+    if isinstance(platforms, str):
+        platforms = [p.strip() for p in platforms.split(",") if p.strip()]
+    description = str(content.get("description") or content.get("summary") or "")
+    score = max(0.0, min(1.0, float(hit.score)))
+    return {
+        "technique_id": rec.source_id,
+        "name": str(content.get("name") or content.get("title") or rec.source_id),
+        "description": description,
+        "kill_chain_phases": [str(t) for t in tactics],
+        "platforms": [str(p) for p in platforms],
+        "relevance_score": round(score, 4),
+    }
+
 
 @router.post("/analyze", response_model=LogAnalysisResponse)
 async def analyze_logs(request: LogAnalysisRequest, current_user: dict = Depends(get_current_user)) -> LogAnalysisResponse:
     """
-    Analyze system logs using AI summarization and MITRE ATT&CK technique matching.
+    Analyze system logs through KCP normalization, OKF/Cognee knowledge retrieval, and Gemini AI.
     
     This endpoint:
-    1. Uses Gemini AI to summarize the provided logs
-    2. Searches the ChromaDB vector database for matching MITRE ATT&CK techniques
-    3. Optionally enhances the analysis with additional AI insights
-    
-    Args:
-        request: LogAnalysisRequest containing logs and analysis parameters
-        
-    Returns:
-        LogAnalysisResponse with summary, matched techniques, and enhanced analysis
+    1. Runs raw logs through KCP to produce traceable NormalizedEvent records
+    2. Uses Gemini AI to summarize the provided logs and extract a focused search query
+    3. Queries the OKF/Cognee knowledge store for matching MITRE ATT&CK techniques
+    4. Optionally enhances the analysis with additional AI insights
     """
     start_time = time.time()
     
     try:
-        if not gemini_service or not chromadb_service:
+        if not gemini_service or not knowledge_service:
             raise HTTPException(
-                status_code=500,
+                status_code=503,
                 detail="Services not properly initialized"
             )
         
         logger.info(f"Starting log analysis for {len(request.logs)} characters of logs")
-        
-        # Step 1: Summarize logs with Gemini AI
+
+        # Step 1: Normalize logs through KCP (preserving raw evidence references)
+        batch_request = _build_batch_from_raw_logs(
+            request.logs, current_user.get("username", "anonymous")
+        )
+        normalized_events = knowledge_service.normalize_batch(batch_request)
+        logger.info(
+            f"KCP normalized {len(normalized_events)} event(s) for batch {batch_request.batch_id}"
+        )
+
+        # Step 2: Summarize logs with Gemini AI
         logger.info("Generating log summary with Gemini AI")
         summary = await gemini_service.summarize_logs(request.logs)
         
@@ -59,7 +126,6 @@ async def analyze_logs(request: LogAnalysisRequest, current_user: dict = Depends
                 detail="Failed to generate log summary: empty response"
             )
         
-        # Clean the summary - remove any error prefixes that might be mistaken for actual errors
         if summary.startswith("Error generating summary:"):
             logger.error(f"Failed to generate summary: {summary}")
             raise HTTPException(
@@ -67,105 +133,39 @@ async def analyze_logs(request: LogAnalysisRequest, current_user: dict = Depends
                 detail=f"Failed to generate log summary: {summary}"
             )
         
-        # Step 2: Extract a focused search query from the summary
-        # Using the full verbose summary causes the embedding model to match
-        # generic boilerplate instead of the actual observed attacker behaviors.
+        # Step 3: Extract a focused search query enriched with KCP event signals
         logger.info("Extracting focused search query from summary")
         search_query = await gemini_service.extract_search_query(request.logs, summary)
+        kcp_event_types = sorted(
+            {
+                evt.event_type.replace("_", " ")
+                for evt in normalized_events
+                if evt.event_type != "system_log_event"
+            }
+        )
+        if kcp_event_types:
+            search_query = f"{search_query} {' '.join(kcp_event_types)}".strip()
         logger.info(f"Search query extracted ({len(search_query)} chars)")
 
-        # Step 3: Search for matching MITRE ATT&CK techniques using the focused query
-        logger.info("Searching for matching ATT&CK techniques")
-        techniques_data = await chromadb_service.search_techniques(
-            query=search_query,
-            n_results=request.max_results
-        )
-        
-        # Convert to response models
-        matched_techniques = [
-            AttackTechnique(
-                technique_id=tech['technique_id'],
-                name=tech['name'],
-                description=tech['description'],
-                kill_chain_phases=tech['kill_chain_phases'],
-                platforms=tech['platforms'],
-                relevance_score=tech['relevance_score']
+        # Step 4: Search OKF/Cognee knowledge store for matching MITRE ATT&CK techniques
+        logger.info("Searching OKF/Cognee knowledge store for matching ATT&CK techniques")
+        search_resp = await knowledge_service.search(
+            KnowledgeSearchQuery(
+                query=search_query,
+                source_type="mitre_attack",
+                kind="technique",
+                top_k=request.max_results or 5,
+                search_mode="auto",
             )
+        )
+        techniques_data = [_hit_to_technique_dict(hit) for hit in search_resp.hits]
+        
+        matched_techniques = [
+            AttackTechnique(**tech)
             for tech in techniques_data
         ]
         
-        # Step 2.5: Validate MITRE techniques to prevent hallucination
-        logger.info("Validating MITRE techniques against official framework")
-        validation_report = mitre_validation_service.validate_techniques_list(
-            [tech.model_dump() for tech in matched_techniques]
-        )
-        
-        # Check validation results and add warning to summary if needed
-        validation_summary = validation_report['validation_summary']
-        logger.info(f"Validation: {validation_summary['valid_techniques']}/{validation_summary['total_techniques']} "
-                   f"techniques valid (confidence: {validation_summary['average_confidence']:.2f})")
-        
-        # Define validation thresholds for warning
-        min_validation_rate = 0.6  # At least 60% of techniques should be valid
-        min_avg_confidence = 0.5   # Average confidence should be at least 50%
-        max_hallucinated = 3       # Maximum 3 hallucinated techniques
-        
-        validation_rate = validation_summary['validation_rate']
-        avg_confidence = validation_summary['average_confidence']
-        hallucinated_count = validation_report['issues']['likely_hallucinated']
-        
-        # Filter out low-confidence techniques and prepare validation warning
-        validated_techniques = []
-        filtered_count = 0
-        validation_warning = ""
-        
-        for i, result in enumerate(validation_report['detailed_results']):
-            if result.is_valid or result.confidence_score > 0.7:
-                # Use corrected data if available
-                if result.corrected_data:
-                    validated_techniques.append(AttackTechnique(**result.corrected_data))
-                    logger.info(f"Using corrected data for technique: {result.technique_id}")
-                else:
-                    validated_techniques.append(matched_techniques[i])
-            else:
-                filtered_count += 1
-                logger.warning(f"Filtered out low-confidence technique: {result.technique_id} "
-                             f"(confidence: {result.confidence_score:.2f})")
-        
-        matched_techniques = validated_techniques
-        
-        # Add validation warning to summary if quality is poor
-        if (validation_rate < min_validation_rate or 
-            avg_confidence < min_avg_confidence or 
-            hallucinated_count > max_hallucinated or
-            filtered_count > 0):
-            
-            warning_parts = []
-            if filtered_count > 0:
-                warning_parts.append(f"filtered out {filtered_count} unverified technique(s)")
-            if hallucinated_count > 0:
-                warning_parts.append(f"detected {hallucinated_count} potentially hallucinated technique(s)")
-            if validation_rate < min_validation_rate:
-                warning_parts.append(f"validation rate was {validation_rate:.1%} (below recommended 60%)")
-            
-            validation_warning = (
-                f"\n\n⚠️ MITRE ATT&CK Validation Notice: "
-                f"The MITRE framework identification may not be fully accurate. "
-                f"Analysis {', '.join(warning_parts)}. "
-                f"Please verify technique relevance manually. "
-                f"Consider refining your log query for better technique matching."
-            )
-            
-            logger.warning(f"Added validation warning to summary: {len(warning_parts)} issues detected")
-        
-        # Append validation warning to summary if present
-        if validation_warning:
-            summary += validation_warning
-        
-        if filtered_count > 0:
-            logger.info(f"Filtered out {filtered_count} low-confidence techniques, proceeding with {len(matched_techniques)} validated techniques")
-        
-        # Step 3: Enhanced analysis (if requested)
+        # Step 5: Enhanced analysis (if requested)
         enhanced_analysis = None
         if request.enhance_with_ai and matched_techniques:
             logger.info("Generating enhanced threat analysis")
@@ -211,23 +211,25 @@ async def analyze_logs(request: LogAnalysisRequest, current_user: dict = Depends
 @router.post("/search-techniques")
 async def search_techniques(query: str, max_results: int = 5) -> Dict[str, Any]:
     """
-    Search MITRE ATT&CK techniques directly by query.
-    
-    Args:
-        query: Search query string
-        max_results: Maximum number of results to return
-        
-    Returns:
-        Dictionary with search results
+    Search MITRE ATT&CK techniques directly from the OKF/Cognee knowledge store.
     """
     try:
-        if not chromadb_service:
+        if not knowledge_service:
             raise HTTPException(
-                status_code=500,
-                detail="ChromaDB service not initialized"
+                status_code=503,
+                detail="Knowledge service not initialized"
             )
         
-        techniques = await chromadb_service.search_techniques(query, max_results)
+        search_resp = await knowledge_service.search(
+            KnowledgeSearchQuery(
+                query=query,
+                source_type="mitre_attack",
+                kind="technique",
+                top_k=max_results,
+                search_mode="auto",
+            )
+        )
+        techniques = [_hit_to_technique_dict(hit) for hit in search_resp.hits]
         
         return {
             "query": query,
@@ -235,6 +237,8 @@ async def search_techniques(query: str, max_results: int = 5) -> Dict[str, Any]:
             "techniques": techniques
         }
         
+    except HTTPException:
+        raise
     except Exception as e:
         logger.error(f"Error in technique search: {str(e)}")
         raise HTTPException(
@@ -244,17 +248,27 @@ async def search_techniques(query: str, max_results: int = 5) -> Dict[str, Any]:
 
 @router.get("/stats")
 async def get_database_stats() -> Dict[str, Any]:
-    """Get statistics about the MITRE ATT&CK database."""
+    """Get statistics about the OKF/Cognee knowledge store."""
     try:
-        if not chromadb_service:
+        if not knowledge_service:
             raise HTTPException(
-                status_code=500,
-                detail="ChromaDB service not initialized"
+                status_code=503,
+                detail="Knowledge service not initialized"
             )
         
-        stats = await chromadb_service.get_collection_stats()
-        return stats
+        stats = await knowledge_service.stats()
+        return {
+            "total_techniques": stats.counts_by_kind.get("technique", stats.total_records),
+            "total_records": stats.total_records,
+            "collection_name": f"okf-{stats.backend}",
+            "embedding_model": knowledge_service.settings.embedding_model,
+            "counts_by_source_type": stats.counts_by_source_type,
+            "counts_by_kind": stats.counts_by_kind,
+            "last_updated": stats.last_ingested_at.isoformat() if stats.last_ingested_at else None,
+        }
         
+    except HTTPException:
+        raise
     except Exception as e:
         logger.error(f"Error getting database stats: {str(e)}")
         raise HTTPException(

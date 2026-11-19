@@ -68,7 +68,7 @@ class GeminiService:
     
     async def extract_search_query(self, logs: str, summary: str) -> str:
         """
-        Extract a concise, search-optimized query for ChromaDB vector search.
+        Extract a concise, search-optimized query for OKF/Cognee knowledge retrieval.
         
         The full summary is verbose and structured (with numbered sections), which
         causes the embedding model to focus on the boilerplate rather than the

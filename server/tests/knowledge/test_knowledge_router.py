@@ -120,6 +120,20 @@ def test_knowledge_router_full_lifecycle() -> None:
         assert events[0]["scope_key"] == "host:workstation-17|account:alex"
         assert events[0]["event_type"] == "authentication_failure"
 
+        # 6b. Prepare InvestigationInput (KCP + OKF retrieval handoff for multi-agent orchestrator)
+        prep_resp = client.post(
+            "/api/v1/knowledge/prepare-investigation",
+            json=batch_payload,
+            params={"top_k_knowledge": 5},
+        )
+        assert prep_resp.status_code == 200
+        inv_input = prep_resp.json()
+        assert inv_input["investigation_id"].startswith("inv-")
+        assert len(inv_input["normalized_events"]) == 1
+        assert inv_input["normalized_events"][0]["event_id"] == "evt-0001"
+        assert inv_input["sequence_cues"] == []
+        assert isinstance(inv_input["knowledge_records"], list)
+
         # 7. Validation checks
         bad_search = client.get("/api/v1/knowledge/search", params={"q": ""})
         assert bad_search.status_code == 422

@@ -6,7 +6,7 @@ from fastapi.encoders import jsonable_encoder
 from contextlib import asynccontextmanager
 from datetime import datetime
 from core import Config, logger
-from services import GeminiService, ChromaDBService
+from services import GeminiService
 from services.knowledge import KnowledgeService
 from routers import auth, users, analysis_router, mitre, knowledge_router
 from routers import monitoring
@@ -16,35 +16,23 @@ from routers.knowledge import set_knowledge_service
 from model import HealthCheck, ErrorResponse, DatabaseStats
 
 gemini_service: GeminiService = None
-chromadb_service: ChromaDBService = None
 knowledge_service: KnowledgeService = None
 
 @asynccontextmanager
 async def lifespan(app: FastAPI):
     """Manage application lifespan - startup and shutdown events."""
-    logger.info("Starting LogIQ API server...")
+    logger.info("Starting ForensIQ API server...")
     try:
-        global gemini_service, chromadb_service, knowledge_service
+        global gemini_service, knowledge_service
         logger.info("Initializing Gemini AI service...")
         gemini_service = GeminiService()
-        logger.info("Initializing ChromaDB service...")
-        chromadb_service = ChromaDBService()
-        logger.info("Initializing MITRE ATT&CK database...")
-        db_initialized = await chromadb_service.initialize_database()
-        if not db_initialized:
-            logger.error("Failed to initialize database")
-            raise Exception("Database initialization failed")
-        # Set services for routers
-        set_services(gemini_service, chromadb_service)
-        set_mitre_services(chromadb_service, gemini_service)
-        try:
-            logger.info("Initializing ForensIQ knowledge service (KCP/OKF/Cognee)...")
-            knowledge_service = KnowledgeService()
-            await knowledge_service.initialize()
-            set_knowledge_service(knowledge_service)
-        except Exception as k_exc:
-            logger.warning(f"Knowledge service initialization degraded: {str(k_exc)}")
-            knowledge_service = None
+        logger.info("Initializing ForensIQ knowledge service (KCP/OKF/Cognee)...")
+        knowledge_service = KnowledgeService()
+        await knowledge_service.initialize()
+        # Wire services into routers
+        set_knowledge_service(knowledge_service)
+        set_services(gemini_service, knowledge_service)
+        set_mitre_services(knowledge_service, gemini_service)
         logger.info("All services initialized successfully")
     except Exception as e:
         logger.error(f"Failed to initialize services: {str(e)}")
@@ -55,11 +43,11 @@ async def lifespan(app: FastAPI):
             await knowledge_service.close()
         except Exception as k_exc:
             logger.warning(f"Error closing knowledge service: {str(k_exc)}")
-    logger.info("Shutting down LogIQ API server...")
+    logger.info("Shutting down ForensIQ API server...")
 
 app = FastAPI(
-    title="LogIQ - MITRE ATT&CK Log Analysis API",
-    description="AI-powered system log analysis with MITRE ATT&CK technique matching using Gemini AI and ChromaDB RAG",
+    title="ForensIQ - MITRE ATT&CK & CVE Log Analysis API",
+    description="AI-powered system log analysis with KCP normalization, OKF/Cognee knowledge retrieval, and Gemini AI",
     version="1.0.0",
     docs_url="/docs",
     redoc_url="/redoc",
@@ -104,27 +92,21 @@ async def health_check():
             services_status["gemini_ai"] = "healthy"
         else:
             services_status["gemini_ai"] = "not_initialized"
-        if chromadb_service:
+        db_stats = None
+        if knowledge_service:
             try:
-                stats = await chromadb_service.get_collection_stats()
-                if "error" in stats:
-                    services_status["chromadb"] = f"error: {stats['error']}"
-                else:
-                    services_status["chromadb"] = "healthy"
-                    db_stats = DatabaseStats(
-                        total_techniques=stats.get('total_techniques', 0),
-                        collection_name=stats.get('collection_name', 'unknown'),
-                        embedding_model=stats.get('embedding_model', 'unknown')
-                    )
+                k_stats = await knowledge_service.stats()
+                services_status["knowledge"] = "healthy"
+                db_stats = DatabaseStats(
+                    total_techniques=k_stats.counts_by_kind.get("technique", k_stats.total_records),
+                    collection_name=f"okf-{k_stats.backend}",
+                    embedding_model=knowledge_service.settings.embedding_model,
+                    last_updated=k_stats.last_ingested_at,
+                )
             except Exception as e:
-                services_status["chromadb"] = f"error: {str(e)}"
-                db_stats = None
+                services_status["knowledge"] = f"error: {str(e)}"
         else:
-            services_status["chromadb"] = "not_initialized"
-            db_stats = None
-        services_status["knowledge"] = (
-            "healthy" if knowledge_service else "not_initialized"
-        )
+            services_status["knowledge"] = "not_initialized"
         # Determine overall status
         overall_status = "healthy" if all(
             status == "healthy" for status in services_status.values()

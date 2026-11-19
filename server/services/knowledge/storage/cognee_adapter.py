@@ -453,6 +453,21 @@ class CogneeKnowledgeStore:
         self._manifest.initialize()
         return self._manifest.stats(backend_name="cognee")
 
+    async def list_records(
+        self,
+        source_type: str | None = None,
+        kind: str | None = None,
+        limit: int = 100,
+        offset: int = 0,
+    ) -> list[KnowledgeRecord]:
+        self._manifest.initialize()
+        return self._manifest.list_records(
+            source_type=source_type,
+            kind=kind,
+            limit=limit,
+            offset=offset,
+        )
+
     async def save_ingestion_run(self, run: IngestionRunStatus) -> None:
         self._manifest.initialize()
         self._manifest.save_ingestion_run(run)

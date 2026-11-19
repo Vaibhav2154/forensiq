@@ -28,7 +28,7 @@ class LogAnalysisResponse(BaseModel):
 class DatabaseStats(BaseModel):
     """Model for database statistics."""
     total_techniques: int = Field(..., description="Total number of techniques in database")
-    collection_name: str = Field(..., description="ChromaDB collection name")
+    collection_name: str = Field(..., description="Knowledge store backend/collection name")
     embedding_model: str = Field(..., description="Embedding model used")
     last_updated: Optional[datetime] = Field(None, description="When the database was last updated")
 

@@ -7,7 +7,6 @@ from typing import Any
 
 _EXPORTS: dict[str, tuple[str, str]] = {
     "GeminiService": (".gemini_service", "GeminiService"),
-    "ChromaDBService": (".chromadb_service", "ChromaDBService"),
     "EncryptionService": (".encryption_service", "EncryptionService"),
     "AnalysisStorageService": (".analysis_storage_service", "AnalysisStorageService"),
     "analysis_storage_service": (".analysis_storage_service", "analysis_storage_service"),
@@ -15,7 +14,6 @@ _EXPORTS: dict[str, tuple[str, str]] = {
 
 __all__ = [
     "GeminiService",
-    "ChromaDBService",
     "EncryptionService",
     "AnalysisStorageService",
     "analysis_storage_service",

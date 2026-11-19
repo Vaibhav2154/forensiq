@@ -3,20 +3,41 @@ from typing import List, Dict, Any, Optional
 import json
 from pydantic import BaseModel, Field
 import json
-from core import Config, logger
-from services import ChromaDBService, GeminiService
+from core import logger
+from services import GeminiService
+from services.knowledge import KnowledgeSearchQuery, KnowledgeService
 
 router = APIRouter(prefix="/api/mitre", tags=["MITRE ATT&CK Framework"])
 
 # Global services (will be set from main.py)
-chromadb_service: Optional[ChromaDBService] = None
+knowledge_service: Optional[KnowledgeService] = None
 gemini_service: Optional[GeminiService] = None
 
-def set_mitre_services(chroma_service: ChromaDBService, gemini_svc: Optional[GeminiService] = None):
+def set_mitre_services(knowledge_svc: Optional[KnowledgeService], gemini_svc: Optional[GeminiService] = None):
     """Set the services for the MITRE router."""
-    global chromadb_service, gemini_service
-    chromadb_service = chroma_service
+    global knowledge_service, gemini_service
+    knowledge_service = knowledge_svc
     gemini_service = gemini_svc
+
+
+def _hit_to_mitre_technique(hit) -> Dict[str, Any]:
+    """Convert an OKF KnowledgeSearchHit to the MITRE technique dict expected by clients."""
+    rec = hit.record
+    content = rec.content or {}
+    tactics = content.get("tactics") or []
+    if isinstance(tactics, str):
+        tactics = [t.strip() for t in tactics.split(",") if t.strip()]
+    platforms = content.get("platforms") or []
+    if isinstance(platforms, str):
+        platforms = [p.strip() for p in platforms.split(",") if p.strip()]
+    return {
+        "technique_id": rec.source_id,
+        "name": str(content.get("name") or content.get("title") or rec.source_id),
+        "description": str(content.get("description") or content.get("summary") or ""),
+        "kill_chain_phases": [str(t) for t in tactics],
+        "platforms": [str(p) for p in platforms],
+        "relevance_score": round(max(0.0, min(1.0, float(hit.score))), 4),
+    }
 
 # Request/Response Models
 class MitreSearchRequest(BaseModel):
@@ -59,10 +80,10 @@ class RagQueryResponse(BaseModel):
 
 async def search_mitre_techniques(request: MitreSearchRequest):
     """
-    Search MITRE ATT&CK techniques using ChromaDB vector search and Gemini AI.
+    Search MITRE ATT&CK techniques using the OKF/Cognee knowledge store and Gemini AI.
     """
     try:
-        if not chromadb_service or not gemini_service:
+        if not knowledge_service or not gemini_service:
             raise HTTPException(
                 status_code=503, 
                 detail="MITRE search services not available"
@@ -70,10 +91,16 @@ async def search_mitre_techniques(request: MitreSearchRequest):
         
         logger.info(f"Searching MITRE techniques with query: {request.query}")
         
-        techniques = await chromadb_service.search_techniques(
-            query=request.query,
-            n_results=request.max_results
+        search_resp = await knowledge_service.search(
+            KnowledgeSearchQuery(
+                query=request.query,
+                source_type="mitre_attack",
+                kind="technique",
+                top_k=request.max_results or 5,
+                search_mode="auto",
+            )
         )
+        techniques = [_hit_to_mitre_technique(hit) for hit in search_resp.hits]
         
         response = await gemini_service.generate_mitre_response(
             query=request.query,
@@ -82,6 +109,8 @@ async def search_mitre_techniques(request: MitreSearchRequest):
         
         return MitreSearchResponse(**response)
         
+    except HTTPException:
+        raise
     except Exception as e:
         logger.error(f"Error in MITRE search endpoint: {str(e)}")
         raise HTTPException(
@@ -95,7 +124,7 @@ async def search_mitre_techniques_get(
     max_results: int = Query(5, description="Maximum number of results", ge=1, le=20)
 ):
     """
-    GET endpoint for searching MITRE ATT&CK techniques using ChromaDB vector search.
+    GET endpoint for searching MITRE ATT&CK techniques using the OKF/Cognee knowledge store.
     
     Alternative to POST endpoint for simple URL-based queries.
     """
@@ -105,55 +134,32 @@ async def search_mitre_techniques_get(
 @router.get("/tactics", response_model=List[str])
 async def get_all_tactics():
     """
-    Get all available MITRE ATT&CK tactics from the database.
+    Get all available MITRE ATT&CK tactics from the OKF/Cognee knowledge store.
     """
     try:
-        if not chromadb_service:
+        if not knowledge_service:
             raise HTTPException(
                 status_code=503,
-                detail="ChromaDB service not available"
+                detail="Knowledge service not available"
             )
 
-        if not chromadb_service.collection:
-            raise HTTPException(
-                status_code=503,
-                detail="ChromaDB collection not initialized"
-            )
-
-        # Get all techniques and extract unique tactics
-        results = chromadb_service.collection.get()
-
+        records = await knowledge_service.list_records(
+            source_type="mitre_attack", kind="technique", limit=2000, offset=0
+        )
         all_tactics = set()
-        metadatas = results.get('metadatas') if isinstance(results, dict) else None
-        if not metadatas:
-            logger.warning('ChromaDB returned no metadatas for tactics')
-            return []
+        for rec in records:
+            tactics_val = (rec.content or {}).get("tactics") or []
+            if isinstance(tactics_val, list):
+                for t in tactics_val:
+                    if t:
+                        all_tactics.add(str(t).strip())
+            elif isinstance(tactics_val, str):
+                all_tactics.update(t.strip() for t in tactics_val.split(",") if t.strip())
 
-        # metadatas may be a nested list (e.g., [[{...}, {...}]]) or a flat list of dicts
-        for entry in metadatas:
-            # Each entry might be a list of metadata dicts or a single metadata dict
-            items = entry if isinstance(entry, list) else [entry]
-            for metadata in items:
-                if not metadata or not isinstance(metadata, dict):
-                    continue
-                tactics_val = metadata.get('kill_chain_phases')
-                # tactics may be stored as a list or comma-separated string
-                if isinstance(tactics_val, list):
-                    for t in tactics_val:
-                        if t:
-                            # if tactic stored as dict or str
-                            if isinstance(t, dict):
-                                all_tactics.add(t.get('phase_name', '').strip())
-                            else:
-                                all_tactics.add(str(t).strip())
-                elif isinstance(tactics_val, str):
-                    all_tactics.update([t.strip() for t in tactics_val.split(',') if t.strip()])
+        return sorted(t for t in all_tactics if t)
 
-        # Remove empty strings and sort
-        tactics_list = sorted([tactic.strip() for tactic in all_tactics if tactic.strip()])
-
-        return tactics_list
-
+    except HTTPException:
+        raise
     except Exception as e:
         logger.error(f"Error getting tactics: {str(e)}")
         raise HTTPException(
@@ -164,52 +170,32 @@ async def get_all_tactics():
 @router.get("/platforms", response_model=List[str])
 async def get_all_platforms():
     """
-    Get all available MITRE ATT&CK platforms from the database.
+    Get all available MITRE ATT&CK platforms from the OKF/Cognee knowledge store.
     """
     try:
-        if not chromadb_service:
+        if not knowledge_service:
             raise HTTPException(
                 status_code=503,
-                detail="ChromaDB service not available"
+                detail="Knowledge service not available"
             )
 
-        if not chromadb_service.collection:
-            raise HTTPException(
-                status_code=503,
-                detail="ChromaDB collection not initialized"
-            )
-
-        # Get all techniques and extract unique platforms
-        results = chromadb_service.collection.get()
-
+        records = await knowledge_service.list_records(
+            source_type="mitre_attack", kind="technique", limit=2000, offset=0
+        )
         all_platforms = set()
-        metadatas = results.get('metadatas') if isinstance(results, dict) else None
-        if not metadatas:
-            logger.warning('ChromaDB returned no metadatas for platforms')
-            return []
+        for rec in records:
+            platforms_val = (rec.content or {}).get("platforms") or []
+            if isinstance(platforms_val, list):
+                for p in platforms_val:
+                    if p:
+                        all_platforms.add(str(p).strip())
+            elif isinstance(platforms_val, str):
+                all_platforms.update(p.strip() for p in platforms_val.split(",") if p.strip())
 
-        for entry in metadatas:
-            items = entry if isinstance(entry, list) else [entry]
-            for metadata in items:
-                if not metadata or not isinstance(metadata, dict):
-                    continue
-                platforms_val = metadata.get('platforms')
-                # platforms may be a list or comma-separated string
-                if isinstance(platforms_val, list):
-                    for p in platforms_val:
-                        if p:
-                            if isinstance(p, dict):
-                                all_platforms.add(p.get('name', '').strip())
-                            else:
-                                all_platforms.add(str(p).strip())
-                elif isinstance(platforms_val, str):
-                    all_platforms.update([p.strip() for p in platforms_val.split(',') if p.strip()])
+        return sorted(p for p in all_platforms if p)
 
-        # Remove empty strings and sort
-        platforms_list = sorted([platform.strip() for platform in all_platforms if platform.strip()])
-
-        return platforms_list
-
+    except HTTPException:
+        raise
     except Exception as e:
         logger.error(f"Error getting platforms: {str(e)}")
         raise HTTPException(
@@ -220,22 +206,28 @@ async def get_all_platforms():
 @router.get("/stats", response_model=Dict[str, Any])
 async def get_mitre_stats():
     """
-    Get statistics about the MITRE ATT&CK database.
+    Get statistics about the MITRE ATT&CK knowledge store.
     """
     try:
-        if not chromadb_service:
+        if not knowledge_service:
             raise HTTPException(
                 status_code=503,
-                detail="ChromaDB service not available"
+                detail="Knowledge service not available"
             )
         
-        stats = await chromadb_service.get_collection_stats()
+        stats = await knowledge_service.stats()
+        return {
+            "total_techniques": stats.counts_by_kind.get("technique", stats.total_records),
+            "total_records": stats.total_records,
+            "collection_name": f"okf-{stats.backend}",
+            "embedding_model": knowledge_service.settings.embedding_model,
+            "counts_by_source_type": stats.counts_by_source_type,
+            "counts_by_kind": stats.counts_by_kind,
+            "last_updated": stats.last_ingested_at.isoformat() if stats.last_ingested_at else None,
+        }
         
-        # Add embedding model info
-        stats['embedding_model'] = Config.EMBEDDING_MODEL
-        
-        return stats
-        
+    except HTTPException:
+        raise
     except Exception as e:
         logger.error(f"Error getting MITRE stats: {str(e)}")
         raise HTTPException(
@@ -249,42 +241,39 @@ async def get_all_techniques(
     offset: int = Query(0, description="Number of techniques to skip", ge=0)
 ):
     """
-    Get all MITRE ATT&CK techniques from the database.
+    Get all MITRE ATT&CK techniques from the OKF/Cognee knowledge store.
     """
     try:
-        if not chromadb_service:
+        if not knowledge_service:
             raise HTTPException(
                 status_code=503,
-                detail="ChromaDB service not available"
+                detail="Knowledge service not available"
             )
 
-        if not chromadb_service.collection:
-            raise HTTPException(
-                status_code=503,
-                detail="ChromaDB collection not initialized"
-            )
-
-        # Get all techniques with pagination
-        results = chromadb_service.collection.get(
+        records = await knowledge_service.list_records(
+            source_type="mitre_attack",
+            kind="technique",
             limit=limit,
-            offset=offset
+            offset=offset,
         )
         
         techniques = []
-        if results.get('metadatas'):
-            for metadata in results['metadatas']:
-                if metadata:
-                    technique = {
-                        'id': metadata.get('technique_id', ''),
-                        'name': metadata.get('name', ''),
-                        'description': metadata.get('description', ''),
-                        'phase': metadata.get('kill_chain_phases', '').split(',')[0] if metadata.get('kill_chain_phases') else 'unknown',
-                        'platforms': metadata.get('platforms', '').split(',') if metadata.get('platforms') else []
-                    }
-                    techniques.append(technique)
+        for rec in records:
+            content = rec.content or {}
+            tactics = content.get("tactics") or []
+            platforms = content.get("platforms") or []
+            techniques.append({
+                "id": rec.source_id,
+                "name": str(content.get("name") or rec.source_id),
+                "description": str(content.get("description") or content.get("summary") or ""),
+                "phase": str(tactics[0]) if isinstance(tactics, list) and tactics else "unknown",
+                "platforms": [str(p) for p in platforms] if isinstance(platforms, list) else [],
+            })
         
         return techniques
         
+    except HTTPException:
+        raise
     except Exception as e:
         logger.error(f"Error getting all techniques: {str(e)}")
         raise HTTPException(
@@ -297,26 +286,31 @@ async def rag_mitre_query(request: RagQueryRequest):
     """
     RAG-based query endpoint for conversational MITRE ATT&CK analysis.
     
-    Uses vector embeddings to find relevant techniques and generates
-    conversational responses using AI for natural interaction.
+    Queries the OKF/Cognee knowledge store for relevant techniques and generates
+    conversational responses using Gemini AI.
     """
     import time
     start_time = time.time()
     
     try:
-        if not chromadb_service or not gemini_service:
+        if not knowledge_service or not gemini_service:
             raise HTTPException(
                 status_code=503,
-                detail="MITRE RAG services not available: missing ChromaDB or Gemini service"
+                detail="MITRE RAG services not available: missing KnowledgeService or Gemini service"
             )
         
         logger.info(f"Processing RAG query: {request.query}")
 
-        # Search for relevant techniques using embeddings
-        relevant_techniques = await chromadb_service.search_techniques(
-            query=request.query,
-            n_results=request.max_context_techniques
+        search_resp = await knowledge_service.search(
+            KnowledgeSearchQuery(
+                query=request.query,
+                source_type="mitre_attack",
+                kind="technique",
+                top_k=request.max_context_techniques or 5,
+                search_mode="auto",
+            )
         )
+        relevant_techniques = [_hit_to_mitre_technique(hit) for hit in search_resp.hits]
 
         # Detect if the user is asking for a general MITRE ATT&CK overview (high-level intent)
         lower_q = (request.query or "").lower()
@@ -366,7 +360,7 @@ async def rag_mitre_query(request: RagQueryRequest):
             relevant_techniques=response_techniques,
             confidence_score=round(confidence_score, 3),
             processing_time_ms=round(processing_time, 2),
-            embedding_model=Config.EMBEDDING_MODEL,
+            embedding_model=knowledge_service.settings.embedding_model,
             total_techniques_found=len(relevant_techniques)
         )
         

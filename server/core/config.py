@@ -14,7 +14,6 @@ class Settings(BaseSettings):
   
   # ForensIQ specific settings
   GEMINI_API_KEY: str
-  CHROMA_PERSIST_DIRECTORY: str = "./chroma_db"
   ANONYMIZED_TELEMETRY: str = "False"
   LOG_LEVEL: str = "INFO"
   API_HOST: str = "localhost"
@@ -33,7 +32,6 @@ settings = Settings()
 
 class Config:
     GEMINI_API_KEY = settings.GEMINI_API_KEY
-    CHROMA_PERSIST_DIRECTORY = settings.CHROMA_PERSIST_DIRECTORY
     EMBEDDING_MODEL = "all-MiniLM-L6-v2"
     
     ATTACK_DATA_PATH = "./attack-stix-data/enterprise-attack/enterprise-attack-17.1.json"

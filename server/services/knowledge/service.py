@@ -2,9 +2,17 @@
 
 from __future__ import annotations
 
+from datetime import datetime, timezone
 from pathlib import Path
+import uuid
 
-from contracts import BatchIngestRequest, NormalizedEvent
+from contracts import (
+    BatchIngestRequest,
+    InvestigationInput,
+    KnowledgeRecord,
+    NormalizedEvent,
+    SequenceCue,
+)
 from services.knowledge.config import KnowledgeSettings
 from services.knowledge.kcp import KCPPipeline, normalize_batch as kcp_normalize_batch
 from services.knowledge.models import (
@@ -117,5 +125,63 @@ class KnowledgeService:
     async def stats(self) -> KnowledgeStoreStats:
         return await self.store.stats()
 
+    async def list_records(
+        self,
+        source_type: str | None = None,
+        kind: str | None = None,
+        limit: int = 100,
+        offset: int = 0,
+    ) -> list[KnowledgeRecord]:
+        return await self.store.list_records(
+            source_type=source_type,
+            kind=kind,
+            limit=limit,
+            offset=offset,
+        )
+
     def normalize_batch(self, request: BatchIngestRequest) -> list[NormalizedEvent]:
         return kcp_normalize_batch(request)
+
+    async def prepare_investigation_input(
+        self,
+        request: BatchIngestRequest,
+        top_k_knowledge: int = 10,
+        sequence_cues: list[SequenceCue] | None = None,
+    ) -> InvestigationInput:
+        """Run KCP log normalization and OKF/Cognee retrieval to produce InvestigationInput."""
+        normalized_events = self.normalize_batch(request)
+
+        # Build concise retrieval terms from KCP-normalized events
+        query_terms: list[str] = []
+        seen_terms: set[str] = set()
+        for evt in normalized_events:
+            candidates = [evt.event_type.replace("_", " ")]
+            for key in ("process", "command", "outcome", "severity", "service"):
+                val = evt.features.get(key)
+                if val:
+                    candidates.append(str(val))
+            for term in candidates:
+                cleaned = term.strip()
+                if cleaned and cleaned.lower() not in seen_terms:
+                    seen_terms.add(cleaned.lower())
+                    query_terms.append(cleaned)
+
+        knowledge_records: list[KnowledgeRecord] = []
+        if query_terms and top_k_knowledge > 0:
+            search_text = " ".join(query_terms[:16])
+            response = await self.search(
+                KnowledgeSearchQuery(
+                    query=search_text,
+                    top_k=top_k_knowledge,
+                    search_mode="auto",
+                )
+            )
+            knowledge_records = [hit.record for hit in response.hits]
+
+        return InvestigationInput(
+            investigation_id=f"inv-{uuid.uuid4().hex[:12]}",
+            normalized_events=normalized_events,
+            knowledge_records=knowledge_records,
+            sequence_cues=sequence_cues or [],
+            created_at=datetime.now(timezone.utc),
+        )

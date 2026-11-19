@@ -164,3 +164,19 @@ class InMemoryKnowledgeStore:
         )
         return ordered[:limit]
 
+    async def list_records(
+        self,
+        source_type: str | None = None,
+        kind: str | None = None,
+        limit: int = 100,
+        offset: int = 0,
+    ) -> list[KnowledgeRecord]:
+        items = list(self._records.values())
+        if source_type:
+            items = [r for r in items if r.source_type == source_type]
+        if kind:
+            target = kind.lower()
+            items = [r for r in items if str(r.content.get("kind", "")).lower() == target]
+        items.sort(key=lambda r: r.source_id)
+        return items[offset : offset + limit]
+

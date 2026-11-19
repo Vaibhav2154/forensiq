@@ -483,3 +483,26 @@ class ManifestStore:
             ).fetchall()
         return [IngestionRunStatus.model_validate_json(r["run_json"]) for r in rows]
 
+    def list_records(
+        self,
+        source_type: str | None = None,
+        kind: str | None = None,
+        limit: int = 100,
+        offset: int = 0,
+    ) -> list[KnowledgeRecord]:
+        conn = self._ensure_conn()
+        clauses: list[str] = []
+        params: list[Any] = []
+        if source_type:
+            clauses.append("source_type = ?")
+            params.append(source_type)
+        if kind:
+            clauses.append("LOWER(kind) = LOWER(?)")
+            params.append(kind)
+        where = f"WHERE {' AND '.join(clauses)}" if clauses else ""
+        sql = f"SELECT record_json FROM records {where} ORDER BY source_id ASC LIMIT ? OFFSET ?"
+        params.extend([limit, offset])
+        with self._lock:
+            rows = conn.execute(sql, tuple(params)).fetchall()
+        return [KnowledgeRecord.model_validate_json(r["record_json"]) for r in rows]
+

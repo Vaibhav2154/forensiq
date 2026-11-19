@@ -170,6 +170,14 @@ class KnowledgeStore(Protocol):
 
     async def search(self, query: KnowledgeSearchQuery) -> list[KnowledgeSearchHit]: ...
 
+    async def list_records(
+        self,
+        source_type: str | None = None,
+        kind: str | None = None,
+        limit: int = 100,
+        offset: int = 0,
+    ) -> list[KnowledgeRecord]: ...
+
     async def stats(self) -> KnowledgeStoreStats: ...
 
     async def save_ingestion_run(self, run: IngestionRunStatus) -> None: ...

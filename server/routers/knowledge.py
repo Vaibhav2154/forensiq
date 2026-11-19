@@ -8,7 +8,7 @@ from typing import Literal
 from fastapi import APIRouter, Depends, HTTPException, Query
 from pydantic import BaseModel, Field
 
-from contracts import BatchIngestRequest, NormalizedEvent
+from contracts import BatchIngestRequest, InvestigationInput, NormalizedEvent
 from services.knowledge.models import (
     IngestionRunStatus,
     KnowledgeRecordDetailResponse,
@@ -214,3 +214,16 @@ async def normalize_log_batch(
 ) -> list[NormalizedEvent]:
     """Normalize a BatchIngestRequest into traceable NormalizedEvent records."""
     return service.normalize_batch(request)
+
+
+@router.post("/prepare-investigation", response_model=InvestigationInput)
+async def prepare_investigation(
+    request: BatchIngestRequest,
+    top_k_knowledge: int = Query(default=10, ge=1, le=50),
+    service: KnowledgeService = Depends(get_knowledge_service),
+) -> InvestigationInput:
+    """Run KCP log normalization + OKF/Cognee retrieval and return InvestigationInput."""
+    return await service.prepare_investigation_input(
+        request=request,
+        top_k_knowledge=top_k_knowledge,
+    )
