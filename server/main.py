@@ -98,7 +98,7 @@ async def health_check():
                 k_stats = await knowledge_service.stats()
                 services_status["knowledge"] = "healthy"
                 db_stats = DatabaseStats(
-                    total_techniques=k_stats.counts_by_kind.get("technique", k_stats.total_records),
+                    total_techniques=k_stats.counts_by_kind.get("attack-pattern", k_stats.total_records),
                     collection_name=f"okf-{k_stats.backend}",
                     embedding_model=knowledge_service.settings.embedding_model,
                     last_updated=k_stats.last_ingested_at,
