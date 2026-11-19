@@ -1,11 +1,12 @@
 """Command-line front end for ForensIQ.
 
-Thin presentation over :class:`cli_agent.client.CliService`. Argument names and
+Thin presentation over :class:`cli_agent.services.CliService`. Argument names and
 command shapes mirror the legacy LogIQ CLI so existing muscle memory keeps
 working; nothing here implements authentication, collection or HTTP itself.
 
-The Textual application will reuse ``CliService`` directly and ignore this
-module entirely.
+``forensiq tui`` is the only command that does not go through this module's
+dispatch: the Textual application owns its own event loop and reuses
+``CliService`` directly.
 """
 
 from __future__ import annotations
@@ -19,9 +20,9 @@ from pathlib import Path
 from typing import Sequence
 
 from . import __version__
-from .client.cli_service import CliService
-from .client.errors import ForensIQError
-from .client.monitoring_service import MonitoringState
+from .services.cli_service import CliService
+from .services.errors import ForensIQError
+from .services.monitoring_service import MonitoringState
 
 DEFAULT_API_URL = "http://localhost:8000"
 
@@ -75,6 +76,8 @@ def build_parser() -> argparse.ArgumentParser:
     analyze.add_argument("--output", help="write the raw analysis JSON here")
     analyze.add_argument("--no-enhance", action="store_true")
 
+    sub.add_parser("tui", help="launch the terminal dashboard")
+
     return parser
 
 
@@ -84,6 +87,8 @@ def main(argv: Sequence[str] | None = None) -> int:
     if not args.command:
         parser.print_help()
         return 0
+    if args.command == "tui":
+        return _launch_tui()
     try:
         return asyncio.run(_dispatch(args))
     except KeyboardInterrupt:
@@ -92,6 +97,21 @@ def main(argv: Sequence[str] | None = None) -> int:
     except ForensIQError as exc:
         print(f"error: {exc}", file=sys.stderr)
         return 1
+
+
+def _launch_tui() -> int:
+    """Run the Textual app; ``textual`` stays an optional dependency."""
+    try:
+        from .tui.app import ForensIQApp
+    except ImportError:
+        print(
+            "error: the TUI requires the optional 'textual' dependency\n"
+            "       install it with: pip install 'forensiq-cli[tui]'",
+            file=sys.stderr,
+        )
+        return 1
+    ForensIQApp().run()
+    return 0
 
 
 async def _dispatch(args: argparse.Namespace) -> int:

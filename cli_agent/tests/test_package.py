@@ -13,7 +13,7 @@ REPO_ROOT = Path(__file__).resolve().parents[2]
 
 def test_client_package_imports() -> None:
     import cli_agent
-    import cli_agent.client as client
+    import cli_agent.services as client
 
     assert cli_agent.__version__
     for name in ("ApiClient", "AuthService", "CliService", "CollectorService", "MonitoringService"):
@@ -65,7 +65,7 @@ def test_import_does_not_prompt_or_connect(monkeypatch) -> None:
         raise AssertionError("import-time side effect detected")
 
     monkeypatch.setattr("getpass.getpass", _fail)
-    for module in ("cli_agent.client", "cli_agent.cli", "cli_agent.legacy.cli_tool"):
+    for module in ("cli_agent.services", "cli_agent.cli", "cli_agent.legacy.cli_tool"):
         sys.modules.pop(module, None)
         importlib.import_module(module)
 

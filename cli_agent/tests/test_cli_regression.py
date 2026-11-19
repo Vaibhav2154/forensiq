@@ -5,10 +5,10 @@ from __future__ import annotations
 import pytest
 
 from cli_agent.cli import build_parser
-from cli_agent.client.auth_service import TokenStore
-from cli_agent.client.cli_service import CliService
-from cli_agent.client.config_service import ConfigService
-from cli_agent.client.errors import AuthError, ConfigurationError
+from cli_agent.services.auth_service import TokenStore
+from cli_agent.services.cli_service import CliService
+from cli_agent.services.config_service import ConfigService
+from cli_agent.services.errors import AuthError, ConfigurationError
 
 from .conftest import FakeTransport, make_jwt
 

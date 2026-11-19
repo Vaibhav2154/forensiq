@@ -7,13 +7,13 @@ import stat
 
 import pytest
 
-from cli_agent.client.api_client import ApiClient
-from cli_agent.client.auth_service import (
+from cli_agent.services.api_client import ApiClient
+from cli_agent.services.auth_service import (
     AuthService,
     TokenStore,
     decode_jwt_expiry,
 )
-from cli_agent.client.errors import AuthError, UnauthorizedError
+from cli_agent.services.errors import AuthError, UnauthorizedError
 
 from .conftest import FakeTransport, make_jwt
 
@@ -174,7 +174,7 @@ def test_decode_jwt_expiry_reads_exp() -> None:
 def test_token_never_appears_in_error_messages(tmp_path) -> None:
     token = make_jwt()
     store = TokenStore(tmp_path / "s.json")
-    from cli_agent.client.auth_service import Session
+    from cli_agent.services.auth_service import Session
 
     store.save(Session(access_token=token, username="analyst"))
     auth = AuthService(store=store, api_client=ApiClient(BASE, transport=FakeTransport()))

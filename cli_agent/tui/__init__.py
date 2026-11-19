@@ -1,9 +1,14 @@
-"""ForensIQ terminal UI (preview only).
+"""ForensIQ terminal UI.
 
-Only :mod:`cli_agent.tui.preview` exists today: a self-contained mock dashboard
-used to review the look and feel. It does not import ``cli_agent.client``, does
-not authenticate, does not collect logs and never contacts the backend.
+* :mod:`cli_agent.tui.app` -- the functional Textual application (Phase 4 + 5):
+  real authentication, configuration and monitoring, with the approved preview
+  layout and an htop-inspired palette in ``styles.tcss``.
+* :mod:`cli_agent.tui.preview` -- the original mock-only preview, kept as the
+  frozen visual baseline for the layout regression test.
 
-The real Phase 4 + 5 implementation will replace it with screens backed by
-:class:`cli_agent.client.cli_service.CliService`.
+Launch: ``python -m cli_agent.tui`` (or ``forensiq tui``).
 """
+
+from .app import ForensIQApp
+
+__all__ = ["ForensIQApp"]

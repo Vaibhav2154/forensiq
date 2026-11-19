@@ -1,6 +1,6 @@
 .mcp.json
 .freebuff
-docs/
-client/
+/docs/
+/client/
 server/frameworks/
 LogIQ-main.zip

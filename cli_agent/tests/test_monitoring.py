@@ -7,12 +7,12 @@ import time
 
 import pytest
 
-from cli_agent.client.api_client import ApiClient
-from cli_agent.client.auth_service import AuthService, Session, TokenStore
-from cli_agent.client.collector_service import CollectorService
-from cli_agent.client.config_service import ClientConfig
-from cli_agent.client.errors import AuthError
-from cli_agent.client.monitoring_service import MonitoringService, MonitoringState
+from cli_agent.services.api_client import ApiClient
+from cli_agent.services.auth_service import AuthService, Session, TokenStore
+from cli_agent.services.collector_service import CollectorService
+from cli_agent.services.config_service import ClientConfig
+from cli_agent.services.errors import AuthError
+from cli_agent.services.monitoring_service import MonitoringService, MonitoringState
 
 from .conftest import FakeExtractor, FakeTransport, make_jwt, wait_for
 

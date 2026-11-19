@@ -4,8 +4,8 @@ from __future__ import annotations
 
 import pytest
 
-from cli_agent.client.errors import MalformedResponseError
-from cli_agent.client.response_adapter import adapt_analysis, next_interval
+from cli_agent.services.errors import MalformedResponseError
+from cli_agent.services.response_adapter import adapt_analysis, next_interval
 
 CURRENT_RESPONSE = {
     "summary": "3 events across 1 scope; 1 technique retrieved.",

@@ -6,8 +6,8 @@ import asyncio
 
 import pytest
 
-from cli_agent.client.api_client import ApiClient
-from cli_agent.client.errors import (
+from cli_agent.services.api_client import ApiClient
+from cli_agent.services.errors import (
     ForbiddenError,
     MalformedResponseError,
     RateLimitError,
@@ -16,7 +16,7 @@ from cli_agent.client.errors import (
     UnauthorizedError,
     ValidationError,
 )
-from cli_agent.client.response_adapter import adapt_analysis
+from cli_agent.services.response_adapter import adapt_analysis
 
 from .conftest import FakeTransport
 

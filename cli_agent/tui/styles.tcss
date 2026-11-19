@@ -1,0 +1,217 @@
+/*
+ * ForensIQ TUI - htop-inspired terminal palette.
+ *
+ * This file owns colours only. All sizing, spacing, borders and widget
+ * arrangement stay identical to the approved preview (see
+ * cli_agent/tui/preview.py); the layout-regression test asserts that.
+ *
+ * Palette
+ *   background        #080C0A
+ *   panel             #101713
+ *   primary green     #00C853
+ *   bright green      #39FF88   active / focused / selected
+ *   muted green       #4B8061   borders and separators
+ *   selection         #176B3A
+ *   text              #E0E8E2
+ *   secondary text    #91A598
+ *   warning           #E5B94B
+ *   error             #F06464
+ *   information       #5CC8D7
+ */
+
+Screen {
+    background: #080C0A;
+    color: #E0E8E2;
+}
+
+Header {
+    background: #101713;
+    color: #E0E8E2;
+}
+
+Header > .header--highlight {
+    color: #39FF88;
+    text-style: bold;
+}
+
+Footer {
+    background: #101713;
+    color: #91A598;
+}
+
+Footer > .footer--key {
+    background: #176B3A;
+    color: #39FF88;
+}
+
+Footer > .footer--description {
+    color: #91A598;
+}
+
+#body { height: 1fr; }
+
+#sidebar {
+    width: 28;
+    background: #101713;
+    border-right: solid #4B8061;
+    padding: 1 0;
+}
+
+#brand {
+    padding: 0 2;
+    color: #00C853;
+    text-style: bold;
+}
+
+#brand-sub {
+    padding: 0 2 1 2;
+    color: #4B8061;
+}
+
+ListView { background: #101713; }
+
+ListItem {
+    padding: 0 1;
+    color: #E0E8E2;
+}
+
+ListItem.--highlight {
+    background: #176B3A;
+    color: #39FF88;
+}
+
+#main { padding: 1 2; }
+
+.card {
+    width: 1fr;
+    height: 5;
+    border: round #4B8061;
+    background: #101713;
+    padding: 0 1;
+    margin-right: 1;
+}
+
+.card-title { color: #91A598; }
+.card-value { color: #E0E8E2; text-style: bold; }
+
+.ok { color: #39FF88; }
+.warn { color: #E5B94B; }
+.bad { color: #F06464; }
+.info { color: #5CC8D7; }
+
+#panels { height: 1fr; }
+
+#monitor-panel {
+    width: 44;
+    border: round #4B8061;
+    background: #101713;
+    padding: 1;
+    margin-right: 1;
+}
+
+#technique-panel {
+    width: 1fr;
+    border: round #4B8061;
+    background: #101713;
+    padding: 1;
+}
+
+.panel-title {
+    color: #00C853;
+    text-style: bold;
+}
+
+.kv { color: #91A598; }
+
+#controls { height: 3; margin-top: 1; }
+
+Button {
+    margin-right: 1;
+    background: #101713;
+    color: #E0E8E2;
+    border: tall #4B8061;
+}
+
+Button:hover {
+    background: #176B3A;
+    color: #39FF88;
+}
+
+Button:focus {
+    border: tall #39FF88;
+    color: #39FF88;
+}
+
+Button.-disabled {
+    color: #4B8061;
+    border: tall #4B8061;
+    background: #101713;
+}
+
+#stream-panel {
+    height: 12;
+    border: round #4B8061;
+    background: #080C0A;
+    padding: 0 1;
+    margin-top: 1;
+}
+
+#view-note {
+    color: #91A598;
+    padding: 0 0 1 0;
+}
+
+DataTable {
+    background: #101713;
+    color: #E0E8E2;
+}
+
+DataTable > .datatable--header {
+    background: #176B3A;
+    color: #39FF88;
+    text-style: bold;
+}
+
+DataTable > .datatable--cursor {
+    background: #176B3A;
+    color: #39FF88;
+}
+
+DataTable > .datatable--even-row { background: #101713; }
+DataTable > .datatable--odd-row { background: #0B1210; }
+
+RichLog {
+    background: #080C0A;
+    color: #E0E8E2;
+}
+
+Input {
+    background: #080C0A;
+    color: #E0E8E2;
+    border: tall #4B8061;
+}
+
+Input:focus {
+    border: tall #39FF88;
+}
+
+/* Sign-in modal. Added for authentication (Phase 4 + 5); the dashboard
+ * layout underneath is unchanged. */
+LoginScreen {
+    align: center middle;
+    background: #080C0A 70%;
+}
+
+#login-box {
+    width: 46;
+    height: auto;
+    border: round #4B8061;
+    background: #101713;
+    padding: 1 2;
+}
+
+#login-box .kv { color: #91A598; padding: 1 0 0 0; }
+
+#login-actions { height: 3; margin-top: 1; }
+
+#login-error { color: #F06464; height: 1; }

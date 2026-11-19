@@ -13,7 +13,7 @@ from typing import Any
 
 import pytest
 
-from cli_agent.client.api_client import HttpResponse
+from cli_agent.services.api_client import HttpResponse
 
 
 class FakeTransport:

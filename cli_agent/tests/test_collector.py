@@ -4,8 +4,8 @@ from __future__ import annotations
 
 import pytest
 
-from cli_agent.client.collector_service import CollectorService
-from cli_agent.client.errors import ConfigurationError, ForensIQError
+from cli_agent.services.collector_service import CollectorService
+from cli_agent.services.errors import ConfigurationError, ForensIQError
 
 from .conftest import FakeExtractor
 

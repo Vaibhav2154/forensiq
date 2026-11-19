@@ -10,7 +10,7 @@ Contents are behaviourally unchanged. The only edits are import mechanics:
 * the Pre-RAG classifier is imported lazily, so importing this package does not
   require the optional ML stack (pandas/numpy/joblib/redis).
 
-Do not add new features here. New behaviour belongs in ``cli_agent.client``.
+Do not add new features here. New behaviour belongs in ``cli_agent.services``.
 """
 
 __version__ = "1.8.0"
