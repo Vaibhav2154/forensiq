@@ -11,6 +11,7 @@ from services.investigation import (
 )
 from services.knowledge import KnowledgeSearchQuery, KnowledgeService
 from services.analysis_storage_service import analysis_storage_service
+from services.visualization_metrics import compute_visualization_metrics
 from routers.auth import get_current_user
 from core import logger
 
@@ -129,7 +130,7 @@ async def analyze_logs(request: LogAnalysisRequest, current_user: dict = Depends
                 KnowledgeSearchQuery(
                     query=search_query,
                     source_type="mitre_attack",
-                    kind="technique",
+                    kind="attack-pattern",
                     top_k=max_results,
                     search_mode="auto",
                 )
@@ -147,6 +148,9 @@ async def analyze_logs(request: LogAnalysisRequest, current_user: dict = Depends
             investigation_payload = None
 
         processing_time = (time.time() - start_time) * 1000  # Convert to milliseconds
+        visualization_metrics = compute_visualization_metrics(
+            matched_techniques, investigation_payload, processing_time
+        )
 
         logger.info(f"Analysis completed in {processing_time:.2f}ms with {len(matched_techniques)} matches")
 
@@ -155,6 +159,7 @@ async def analyze_logs(request: LogAnalysisRequest, current_user: dict = Depends
             matched_techniques=matched_techniques,
             enhanced_analysis=enhanced_analysis,
             investigation=investigation_payload,
+            visualization_metrics=visualization_metrics,
             processing_time_ms=processing_time,
         )
 
@@ -235,7 +240,7 @@ async def get_database_stats() -> Dict[str, Any]:
             "total_techniques": stats.counts_by_kind.get("attack-pattern", stats.total_records),
             "total_records": stats.total_records,
             "collection_name": f"okf-{stats.backend}",
-            "embedding_model": knowledge_service.settings.embedding_model,
+            "embedding_model": knowledge_service.settings.cognee_embedding_model,
             "counts_by_source_type": stats.counts_by_source_type,
             "counts_by_kind": stats.counts_by_kind,
             "last_updated": stats.last_ingested_at.isoformat() if stats.last_ingested_at else None,
@@ -451,7 +456,8 @@ async def get_latest_analysis(
             logger.info(f"No analysis history found for user {current_user['username']}")
             return {"analysis": None}
 
-        latest_id = history[0].id
+        first_item = history[0]
+        latest_id = first_item["id"] if isinstance(first_item, dict) else first_item.id
         result = await analysis_storage_service.get_analysis_result(
             user_id=current_user["username"],
             analysis_id=latest_id

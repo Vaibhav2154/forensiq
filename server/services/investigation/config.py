@@ -99,7 +99,7 @@ class InvestigationSettings(BaseSettings):
     gemini_api_key_recommendation: str | None = Field(default=None)
 
     # Model configuration (default gemini-2.5-flash across all roles)
-    gemini_model: str = Field(default="gemini-2.5-flash")
+    gemini_model: str = Field(default="gemini-3.1-flash-lite")
     gemini_model_orchestrator: str | None = Field(default=None)
     gemini_model_event_analyst: str | None = Field(default=None)
     gemini_model_knowledge_enricher: str | None = Field(default=None)

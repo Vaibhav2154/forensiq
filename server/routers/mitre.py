@@ -220,7 +220,7 @@ async def get_mitre_stats():
             "total_techniques": stats.counts_by_kind.get("attack-pattern", stats.total_records),
             "total_records": stats.total_records,
             "collection_name": f"okf-{stats.backend}",
-            "embedding_model": knowledge_service.settings.embedding_model,
+            "embedding_model": knowledge_service.settings.cognee_embedding_model,
             "counts_by_source_type": stats.counts_by_source_type,
             "counts_by_kind": stats.counts_by_kind,
             "last_updated": stats.last_ingested_at.isoformat() if stats.last_ingested_at else None,
@@ -360,7 +360,7 @@ async def rag_mitre_query(request: RagQueryRequest):
             relevant_techniques=response_techniques,
             confidence_score=round(confidence_score, 3),
             processing_time_ms=round(processing_time, 2),
-            embedding_model=knowledge_service.settings.embedding_model,
+            embedding_model=knowledge_service.settings.cognee_embedding_model,
             total_techniques_found=len(relevant_techniques)
         )
         

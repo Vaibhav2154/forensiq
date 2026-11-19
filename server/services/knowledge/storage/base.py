@@ -90,8 +90,12 @@ def matches_filters(record: KnowledgeRecord, query: KnowledgeSearchQuery) -> boo
         return False
 
     content = record.content
-    if query.kind and str(content.get("kind", "")).lower() != query.kind.lower():
-        return False
+    if query.kind:
+        target_kind = query.kind.strip().lower()
+        if target_kind == "technique":
+            target_kind = "attack-pattern"
+        if str(content.get("kind", "")).lower() != target_kind:
+            return False
 
     if query.tactic:
         target_tactic = query.tactic.strip().lower()

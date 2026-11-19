@@ -248,17 +248,31 @@ class InvestigationService:
 
         initial_records: list[KnowledgeRecord] = []
         initial_scores: dict[str, float] = {}
+        seen_record_ids: set[str] = set()
         if query_terms and top_k > 0:
             search_text = " ".join(query_terms[:18])
-            resp = await self.knowledge_service.search(
+            # Retrieve top-k from both MITRE ATT&CK techniques and CVEs explicitly
+            mitre_resp = await self.knowledge_service.search(
                 KnowledgeSearchQuery(
                     query=search_text,
+                    source_type="mitre_attack",
+                    kind="attack-pattern",
                     top_k=top_k,
                     search_mode="auto",
                 )
             )
-            for hit in resp.hits:
-                initial_records.append(hit.record)
+            cve_resp = await self.knowledge_service.search(
+                KnowledgeSearchQuery(
+                    query=search_text,
+                    source_type="cve",
+                    top_k=top_k,
+                    search_mode="auto",
+                )
+            )
+            for hit in (*mitre_resp.hits, *cve_resp.hits):
+                if hit.record.record_id not in seen_record_ids:
+                    seen_record_ids.add(hit.record.record_id)
+                    initial_records.append(hit.record)
                 src_key = hit.record.source_id.upper()
                 initial_scores[src_key] = max(
                     initial_scores.get(src_key, 0.0),

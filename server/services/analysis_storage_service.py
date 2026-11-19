@@ -7,6 +7,7 @@ from typing import Dict, Any, List, Optional
 import uuid
 from bson import ObjectId
 from services.encryption_service import encryption_service
+from services.visualization_metrics import compute_visualization_metrics
 from db import database
 from core import logger
 
@@ -164,13 +165,19 @@ class AnalysisStorageService:
                 hashed_password=hashed_password  # Use hashed password instead of user_id
             )
             
+            techniques = decrypted_data.get("techniques")
+            investigation = decrypted_data.get("investigation")
+            processing_time_ms = doc.get("processing_time_ms", 0)
             return {
                 "summary": decrypted_data.get("summary"),
-                "matched_techniques": decrypted_data.get("techniques"),
+                "matched_techniques": techniques,
                 "enhanced_analysis": decrypted_data.get("enhanced_analysis"),
-                "investigation": decrypted_data.get("investigation"),
+                "investigation": investigation,
+                "visualization_metrics": compute_visualization_metrics(
+                    techniques, investigation, processing_time_ms
+                ),
                 "analysis_timestamp": self.convert_datetime_to_string(doc.get("analysis_timestamp")),
-                "processing_time_ms": doc.get("processing_time_ms", 0)
+                "processing_time_ms": processing_time_ms
             }
             
         except Exception as e:

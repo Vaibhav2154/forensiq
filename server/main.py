@@ -111,7 +111,7 @@ async def health_check():
                 db_stats = DatabaseStats(
                     total_techniques=k_stats.counts_by_kind.get("attack-pattern", k_stats.total_records),
                     collection_name=f"okf-{k_stats.backend}",
-                    embedding_model=knowledge_service.settings.embedding_model,
+                    embedding_model=knowledge_service.settings.cognee_embedding_model,
                     last_updated=k_stats.last_ingested_at,
                 )
             except Exception as e:

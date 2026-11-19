@@ -167,16 +167,30 @@ class KnowledgeService:
                     query_terms.append(cleaned)
 
         knowledge_records: list[KnowledgeRecord] = []
+        seen_record_ids: set[str] = set()
         if query_terms and top_k_knowledge > 0:
             search_text = " ".join(query_terms[:16])
-            response = await self.search(
+            mitre_resp = await self.search(
                 KnowledgeSearchQuery(
                     query=search_text,
+                    source_type="mitre_attack",
+                    kind="attack-pattern",
                     top_k=top_k_knowledge,
                     search_mode="auto",
                 )
             )
-            knowledge_records = [hit.record for hit in response.hits]
+            cve_resp = await self.search(
+                KnowledgeSearchQuery(
+                    query=search_text,
+                    source_type="cve",
+                    top_k=top_k_knowledge,
+                    search_mode="auto",
+                )
+            )
+            for hit in (*mitre_resp.hits, *cve_resp.hits):
+                if hit.record.record_id not in seen_record_ids:
+                    seen_record_ids.add(hit.record.record_id)
+                    knowledge_records.append(hit.record)
 
         return InvestigationInput(
             investigation_id=f"inv-{uuid.uuid4().hex[:12]}",

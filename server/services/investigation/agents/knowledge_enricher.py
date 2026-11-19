@@ -141,7 +141,7 @@ def make_knowledge_enricher_node(
                     src_filter = None if qspec.source_type == "any" else qspec.source_type
                     if src_filter == "cve" or plan.should_check_cves:
                         cves_checked = True
-                    kind_filter = "technique" if src_filter == "mitre_attack" else None
+                    kind_filter = "attack-pattern" if src_filter == "mitre_attack" else None
                     try:
                         search_resp = await knowledge_service.search(
                             KnowledgeSearchQuery(
