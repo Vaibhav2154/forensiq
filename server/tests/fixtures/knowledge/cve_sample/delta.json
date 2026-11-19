@@ -1,0 +1,19 @@
+{
+  "fetchTime": "2026-11-19T10:14:55.969Z",
+  "numberOfChanges": 2,
+  "new": [
+    {
+      "cveId": "CVE-2025-39447",
+      "cveOrgLink": "https://www.cve.org/CVERecord?id=CVE-2025-39447",
+      "dateUpdated": "2026-04-29T09:51:55.028Z"
+    }
+  ],
+  "updated": [
+    {
+      "cveId": "CVE-2025-39664",
+      "cveOrgLink": "https://www.cve.org/CVERecord?id=CVE-2025-39664",
+      "dateUpdated": "2026-05-01T00:00:00.000Z"
+    }
+  ],
+  "error": []
+}
