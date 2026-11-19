@@ -3,20 +3,18 @@ from typing import List, Dict, Any, Optional
 import json
 from pydantic import BaseModel, Field
 import json
-from core import logger
-from services import AWSBedrockService, ChromaDBService, GeminiService
+from core import Config, logger
+from services import ChromaDBService, GeminiService
 
 router = APIRouter(prefix="/api/mitre", tags=["MITRE ATT&CK Framework"])
 
 # Global services (will be set from main.py)
-aws_bedrock_service: Optional[AWSBedrockService] = None
 chromadb_service: Optional[ChromaDBService] = None
 gemini_service: Optional[GeminiService] = None
 
-def set_mitre_services(bedrock_service: AWSBedrockService, chroma_service: ChromaDBService, gemini_svc: Optional[GeminiService] = None):
+def set_mitre_services(chroma_service: ChromaDBService, gemini_svc: Optional[GeminiService] = None):
     """Set the services for the MITRE router."""
-    global aws_bedrock_service, chromadb_service, gemini_service
-    aws_bedrock_service = bedrock_service
+    global chromadb_service, gemini_service
     chromadb_service = chroma_service
     gemini_service = gemini_svc
 
@@ -61,13 +59,10 @@ class RagQueryResponse(BaseModel):
 
 async def search_mitre_techniques(request: MitreSearchRequest):
     """
-    Search MITRE ATT&CK techniques using AWS Titan embeddings for enhanced context retrieval.
-    
-    This endpoint uses AWS Bedrock Titan text embedding model to provide more accurate
-    semantic search results from the MITRE ATT&CK framework database.
+    Search MITRE ATT&CK techniques using ChromaDB vector search and Gemini AI.
     """
     try:
-        if not aws_bedrock_service or not chromadb_service:
+        if not chromadb_service or not gemini_service:
             raise HTTPException(
                 status_code=503, 
                 detail="MITRE search services not available"
@@ -75,16 +70,12 @@ async def search_mitre_techniques(request: MitreSearchRequest):
         
         logger.info(f"Searching MITRE techniques with query: {request.query}")
         
-        # Search techniques using AWS Titan embeddings
-        techniques = await aws_bedrock_service.search_mitre_techniques(
+        techniques = await chromadb_service.search_techniques(
             query=request.query,
-            chromadb_service=chromadb_service,
             n_results=request.max_results
         )
         
-        # Generate comprehensive response using preferred LLM service (Gemini -> AWS Bedrock)
-        llm_for_response = gemini_service if gemini_service else aws_bedrock_service
-        response = await llm_for_response.generate_mitre_response(
+        response = await gemini_service.generate_mitre_response(
             query=request.query,
             context_techniques=techniques
         )
@@ -104,7 +95,7 @@ async def search_mitre_techniques_get(
     max_results: int = Query(5, description="Maximum number of results", ge=1, le=20)
 ):
     """
-    GET endpoint for searching MITRE ATT&CK techniques using AWS Titan embeddings.
+    GET endpoint for searching MITRE ATT&CK techniques using ChromaDB vector search.
     
     Alternative to POST endpoint for simple URL-based queries.
     """
@@ -241,8 +232,7 @@ async def get_mitre_stats():
         stats = await chromadb_service.get_collection_stats()
         
         # Add embedding model info
-        stats['embedding_model'] = 'aws-titan-v2'
-        stats['embedding_dimension'] = 1024
+        stats['embedding_model'] = Config.EMBEDDING_MODEL
         
         return stats
         
@@ -314,19 +304,17 @@ async def rag_mitre_query(request: RagQueryRequest):
     start_time = time.time()
     
     try:
-        # Require a vector search service (ChromaDB) and at least one LLM service (Gemini or AWS Bedrock)
-        if not chromadb_service or not (aws_bedrock_service or gemini_service):
+        if not chromadb_service or not gemini_service:
             raise HTTPException(
                 status_code=503,
-                detail="MITRE RAG services not available: missing ChromaDB or LLM service"
+                detail="MITRE RAG services not available: missing ChromaDB or Gemini service"
             )
         
         logger.info(f"Processing RAG query: {request.query}")
 
         # Search for relevant techniques using embeddings
-        relevant_techniques = await aws_bedrock_service.search_mitre_techniques(
+        relevant_techniques = await chromadb_service.search_techniques(
             query=request.query,
-            chromadb_service=chromadb_service,
             n_results=request.max_context_techniques
         )
 
@@ -350,15 +338,14 @@ async def rag_mitre_query(request: RagQueryRequest):
                 # Prepare context for AI response generation from found techniques
                 context = _prepare_rag_context(request.query, relevant_techniques)
         
-        # Generate conversational response using LLM service (prefer Gemini, fall back to AWS Bedrock)
-        llm_for_response = gemini_service if gemini_service else aws_bedrock_service
+        # Generate conversational response using Gemini
         try:
-            response_text = await llm_for_response.generate_conversational_response(
+            response_text = await gemini_service.generate_conversational_response(
                 query=request.query,
                 context=context
             )
         except Exception as e:
-            logger.warning(f"LLM response generation failed ({'gemini' if gemini_service else 'aws_bedrock'}): {str(e)}, using fallback")
+            logger.warning(f"LLM response generation failed (gemini): {str(e)}, using fallback")
             response_text = _generate_fallback_response(request.query, relevant_techniques)
         
         # Calculate confidence score based on relevance scores (guard against empty list)
@@ -379,7 +366,7 @@ async def rag_mitre_query(request: RagQueryRequest):
             relevant_techniques=response_techniques,
             confidence_score=round(confidence_score, 3),
             processing_time_ms=round(processing_time, 2),
-            embedding_model="aws-titan-v2",
+            embedding_model=Config.EMBEDDING_MODEL,
             total_techniques_found=len(relevant_techniques)
         )
         
@@ -549,7 +536,7 @@ def _prepare_overview_context(query: str, techniques: List[Dict[str, Any]]) -> s
     return prompt
 
 def _generate_fallback_response(query: str, techniques: List[Dict[str, Any]]) -> str:
-    """Generate fallback response when Titan fails."""
+    """Generate fallback response when LLM generation fails."""
     if not techniques:
         return f"I couldn't find specific MITRE ATT&CK techniques for '{query}', but the framework contains thousands of documented attack patterns. Try rephrasing your query or ask about specific tactics like 'initial access', 'execution', 'persistence', or 'lateral movement'."
     

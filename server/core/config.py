@@ -22,16 +22,10 @@ class Settings(BaseSettings):
   MAX_LOG_LENGTH: str = "10000"
   MAX_RESULTS: str = "5"
   
-  # AWS settings (optional)
-  AWS_ACCESS_KEY_ID: str = ""
-  AWS_SECRET_ACCESS_KEY: str = ""
-  AWS_REGION: str = "us-east-1"
-  AWS_SESSION_TOKEN: str = ""
-  
   # Encryption settings
   ENCRYPTION_MASTER_KEY: str = "default-encryption-key-change-in-production"
   
-  model_config = SettingsConfigDict(env_file=".env")
+  model_config = SettingsConfigDict(env_file=".env", extra="ignore")
 
 
 settings = Settings()
@@ -52,11 +46,6 @@ class Config:
 
     HOST = settings.API_HOST
     PORT = settings.API_PORT
-
-    AWS_REGION = settings.AWS_REGION
-    AWS_ACCESS_KEY_ID = settings.AWS_ACCESS_KEY_ID
-    AWS_SECRET_ACCESS_KEY = settings.AWS_SECRET_ACCESS_KEY
-    AWS_SESSION_TOKEN = settings.AWS_SESSION_TOKEN
 
 logging.basicConfig(
     level=getattr(logging, Config.LOG_LEVEL),

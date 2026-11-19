@@ -6,7 +6,7 @@ from fastapi.encoders import jsonable_encoder
 from contextlib import asynccontextmanager
 from datetime import datetime
 from core import Config, logger
-from services import GeminiService, ChromaDBService, AWSBedrockService
+from services import GeminiService, ChromaDBService
 from services.knowledge import KnowledgeService
 from routers import auth, users, analysis_router, mitre, knowledge_router
 from routers import monitoring
@@ -17,7 +17,6 @@ from model import HealthCheck, ErrorResponse, DatabaseStats
 
 gemini_service: GeminiService = None
 chromadb_service: ChromaDBService = None
-aws_bedrock_service: AWSBedrockService = None
 knowledge_service: KnowledgeService = None
 
 @asynccontextmanager
@@ -25,13 +24,11 @@ async def lifespan(app: FastAPI):
     """Manage application lifespan - startup and shutdown events."""
     logger.info("Starting LogIQ API server...")
     try:
-        global gemini_service, chromadb_service, aws_bedrock_service, knowledge_service
+        global gemini_service, chromadb_service, knowledge_service
         logger.info("Initializing Gemini AI service...")
         gemini_service = GeminiService()
         logger.info("Initializing ChromaDB service...")
         chromadb_service = ChromaDBService()
-        logger.info("Initializing AWS Bedrock service...")
-        aws_bedrock_service = AWSBedrockService()
         logger.info("Initializing MITRE ATT&CK database...")
         db_initialized = await chromadb_service.initialize_database()
         if not db_initialized:
@@ -39,7 +36,7 @@ async def lifespan(app: FastAPI):
             raise Exception("Database initialization failed")
         # Set services for routers
         set_services(gemini_service, chromadb_service)
-        set_mitre_services(aws_bedrock_service, chromadb_service, gemini_service)
+        set_mitre_services(chromadb_service, gemini_service)
         try:
             logger.info("Initializing ForensIQ knowledge service (KCP/OKF/Cognee)...")
             knowledge_service = KnowledgeService()
@@ -107,12 +104,6 @@ async def health_check():
             services_status["gemini_ai"] = "healthy"
         else:
             services_status["gemini_ai"] = "not_initialized"
-            
-        # Check AWS Bedrock service
-        if aws_bedrock_service:
-            services_status["aws_bedrock"] = "healthy"
-        else:
-            services_status["aws_bedrock"] = "not_initialized"
         if chromadb_service:
             try:
                 stats = await chromadb_service.get_collection_stats()
