@@ -16,13 +16,14 @@ snapshot interval: the window's oldest entry is its own anchor.
 
 from __future__ import annotations
 
+import math
 from dataclasses import dataclass
 from datetime import datetime
 from typing import Any, Iterable, Mapping, Sequence
 
 from contracts.models import NormalizedEvent
 
-from .errors import StateCorruptionError
+from .errors import ScoringError, StateCorruptionError
 from .features import EventObservation
 from .scoring import LstmState
 
@@ -59,14 +60,20 @@ class WindowEntry:
     @classmethod
     def from_dict(cls, data: Mapping[str, Any]) -> "WindowEntry":
         try:
+            raw_score = data["score"]
+            if isinstance(raw_score, bool):
+                raise ValueError("score must be numeric")
+            score = float(raw_score)
+            if not math.isfinite(score) or not 0.0 <= score <= 1.0:
+                raise ValueError(f"score {score!r} outside [0.0, 1.0]")
             return cls(
                 event=NormalizedEvent.model_validate(data["event"]),
                 observation=EventObservation.from_dict(data["observation"]),
                 state_before=LstmState.from_dict(data["state_before"]),
                 state_after=LstmState.from_dict(data["state_after"]),
-                score=float(data["score"]),
+                score=score,
             )
-        except (KeyError, TypeError, ValueError) as exc:
+        except (KeyError, TypeError, ValueError, ScoringError) as exc:
             raise StateCorruptionError(f"invalid window entry: {exc}") from exc
 
 

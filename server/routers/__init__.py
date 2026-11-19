@@ -5,13 +5,23 @@ from __future__ import annotations
 import importlib
 from typing import Any
 
-_LAZY_SUBMODULES = {"auth", "users", "analysis", "mitre", "monitoring", "knowledge", "investigations"}
+_LAZY_SUBMODULES = {
+    "auth",
+    "users",
+    "analysis",
+    "mitre",
+    "monitoring",
+    "knowledge",
+    "investigations",
+    "sequence",
+}
 _LAZY_ROUTERS = {
     "auth_router": ".auth",
     "users_router": ".users",
     "analysis_router": ".analysis",
     "knowledge_router": ".knowledge",
     "investigations_router": ".investigations",
+    "sequence_router": ".sequence",
 }
 
 __all__ = [
@@ -20,6 +30,7 @@ __all__ = [
     "analysis_router",
     "knowledge_router",
     "investigations_router",
+    "sequence_router",
 ]
 
 

@@ -9,6 +9,7 @@ from services.sequence import FeatureExtractor, SequenceEngine, rebuild_window
 from .support import (
     AUTH_FAILURE,
     DEFAULT_SCOPE,
+    PRIV_ESCALATION,
     ScriptedCueScorer,
     at,
     fixed_clock,
@@ -185,6 +186,37 @@ class LateEventReplayTests(unittest.TestCase):
         assert state_after_second is not None
         self.assertEqual(state_after_second.event_ids, ["e1", "e2"])
         self.assertEqual(state_after_second.current_state.hidden, (2.0, 1.0, 1.0))
+
+    def test_late_precursor_triggers_cue_on_later_event_without_duplicating_already_crossed(
+        self,
+    ) -> None:
+        engine = SequenceEngine(make_config(), ScriptedCueScorer(), clock=fixed_clock)
+
+        first = engine.process_batch(
+            [make_event("evt-priv", event_time=at(9, 20), event_type=PRIV_ESCALATION)]
+        )
+        self.assertEqual(first.cues, [])
+
+        second = engine.process_batch(
+            [make_event("evt-auth-1", event_time=at(9, 15), event_type=AUTH_FAILURE)]
+        )
+        self.assertEqual(len(second.cues), 1)
+        self.assertEqual(second.cues[0].event_ids, ["evt-auth-1", "evt-priv"])
+
+        # A further late precursor should not re-emit the cue for evt-priv a second time
+        third = engine.process_batch(
+            [make_event("evt-auth-0", event_time=at(9, 10), event_type=AUTH_FAILURE)]
+        )
+        self.assertEqual(third.cues, [])
+
+    def test_equal_timestamp_across_batches_replays_by_event_id_tiebreak(self) -> None:
+        engine = SequenceEngine(make_config(), ScriptedCueScorer(), clock=fixed_clock)
+        engine.process_batch([make_event("evt-b", event_time=at(9, 0))])
+        engine.process_batch([make_event("evt-a", event_time=at(9, 0))])
+
+        state = engine.state_for(DEFAULT_SCOPE)
+        assert state is not None
+        self.assertEqual(state.event_ids, ["evt-a", "evt-b"])
 
 
 if __name__ == "__main__":

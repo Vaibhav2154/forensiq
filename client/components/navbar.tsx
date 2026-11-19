@@ -20,8 +20,7 @@ const Navbar = () => {
     { name: 'DASHBOARD.SYS', href: '/dashboard', icon: <FaAlignLeft />, shortName: 'DASH' },
     { name: 'MITRE_ATTACK.DB', href: '/dashboard/mitre', icon: <FaShield />, shortName: 'MITRE' },
     { name: 'KNOWLEDGE.DB', href: '/dashboard/knowledge', icon: <FaDatabase />, shortName: 'OKF' },
-    { name: 'ANALYSIS.EXE', href: '/dashboard/analysis', icon:<FaSearch />, shortName: 'ANALYZE' },
-    { name: 'CLI_GUIDE', href: '/dashboard/cliguide', icon: <HiMiniComputerDesktop />, shortName: 'CLI' }
+    { name: 'ANALYSIS.EXE', href: '/dashboard/analysis', icon:<FaSearch />, shortName: 'ANALYZE' }
   ]
 
   useEffect(() => {
@@ -88,8 +87,8 @@ const Navbar = () => {
               />
             </div>
             <h1 className='text-sm sm:text-lg md:text-xl font-bold text-green-400 tracking-wider'>
-              <span className='hidden sm:inline'>[LOGIQ_V2.0]</span>
-              <span className='sm:hidden'>[LOGIQ]</span>
+              <span className='hidden sm:inline'>[ForensIQ]</span>
+              <span className='sm:hidden'>[forensiq]</span>
             </h1>
           </div>
 

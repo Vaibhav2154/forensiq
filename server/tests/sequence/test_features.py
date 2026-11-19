@@ -4,7 +4,7 @@ from __future__ import annotations
 
 import unittest
 
-from services.sequence import FeatureExtractor, InvalidEventBatchError
+from services.sequence import EventObservation, FeatureExtractor, InvalidEventBatchError
 
 from .support import AUTH_FAILURE, at, make_event
 
@@ -67,10 +67,20 @@ class FeatureExtractorTests(unittest.TestCase):
 
     def test_non_numeric_severity_is_not_coerced(self) -> None:
         event = make_event("evt-4", event_time=at(9, 15), features={"severity": "high"})
-        self.assertIsNone(self.extractor.build(event).severity)
+        obs = self.extractor.build(event)
+        self.assertIsNone(obs.severity)
+        self.assertEqual(obs.severity_label, "high")
+
+        crit = make_event("evt-4b", event_time=at(9, 15), features={"severity": "CRITICAL"})
+        crit_obs = self.extractor.build(crit)
+        self.assertIsNone(crit_obs.severity)
+        self.assertEqual(crit_obs.severity_label, "critical")
+        roundtrip = EventObservation.from_dict(crit_obs.to_dict())
+        self.assertEqual(roundtrip.severity_label, "critical")
 
         boolean = make_event("evt-5", event_time=at(9, 15), features={"severity": True})
         self.assertIsNone(self.extractor.build(boolean).severity)
+        self.assertIsNone(self.extractor.build(boolean).severity_label)
 
     def test_window_counts_and_novelty(self) -> None:
         first = self.extractor.build(make_event("evt-6", event_time=at(9, 0)))

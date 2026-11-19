@@ -24,6 +24,7 @@ from .support import (
     DEFAULT_SCOPE,
     FIXED_NOW,
     MODEL_VERSION,
+    OTHER_SCOPE,
     PRIV_ESCALATION,
     ConstantScorer,
     ScriptedCueScorer,
@@ -46,6 +47,16 @@ class SequenceConfigTests(unittest.TestCase):
             make_config(threshold=1.5)
         with self.assertRaises(SequenceConfigError):
             make_config(state_ttl_seconds=0)
+        with self.assertRaises(SequenceConfigError):
+            make_config(state_ttl_seconds=float("nan"))
+        with self.assertRaises(SequenceConfigError):
+            make_config(state_ttl_seconds=float("inf"))
+        with self.assertRaises(SequenceConfigError):
+            make_config(state_ttl_seconds=True)
+        with self.assertRaises(SequenceConfigError):
+            make_config(threshold=float("nan"))
+        with self.assertRaises(SequenceConfigError):
+            make_config(threshold=True)
         with self.assertRaises(SequenceConfigError):
             make_config(model_version="  ")
 
@@ -140,6 +151,47 @@ class InvalidInputTests(unittest.TestCase):
         with self.assertRaises(Exception):
             make_event("evt-1", event_time=datetime(2026, 11, 19, 9, 0))
 
+    def test_duplicate_event_id_is_skipped_without_recomputing_lstm(self) -> None:
+        engine = SequenceEngine(make_config(), ScriptedCueScorer(), clock=fixed_clock)
+        e1 = make_event("evt-dup-1", event_time=at(9, 0), event_type=AUTH_FAILURE)
+        e2 = make_event("evt-dup-2", event_time=at(9, 1), event_type=PRIV_ESCALATION)
+
+        first = engine.process_batch([e1])
+        retry = engine.process_batch([e1, e2])
+
+        self.assertEqual(first.duplicate_event_ids, [])
+        self.assertEqual(retry.duplicate_event_ids, ["evt-dup-1"])
+        self.assertEqual(retry.processed_event_ids, ["evt-dup-2"])
+        state = engine.state_for(DEFAULT_SCOPE)
+        assert state is not None
+        self.assertEqual(state.event_ids, ["evt-dup-1", "evt-dup-2"])
+        self.assertEqual(state.current_state.hidden, (2.0, 1.0, 1.0))
+
+    def test_invalid_score_in_append_path_is_rejected_without_mutating_state(self) -> None:
+        class ConditionalBadScorer:
+            def initial_state(self):
+                return ConstantScorer(0.1).initial_state()
+
+            def step(self, state, observation):
+                if observation.event_id == "evt-bad":
+                    return state, float("nan")
+                return ConstantScorer(0.2).step(state, observation)
+
+        engine = SequenceEngine(make_config(), ConditionalBadScorer(), clock=fixed_clock)
+        engine.process_batch([make_event("evt-ok", event_time=at(9, 0))])
+
+        with self.assertRaises(ScoringError):
+            engine.process_batch([make_event("evt-bad", event_time=at(9, 1))])
+
+        state = engine.state_for(DEFAULT_SCOPE)
+        assert state is not None
+        self.assertEqual(state.event_ids, ["evt-ok"])
+
+        neg_engine = SequenceEngine(make_config(), ConstantScorer(-0.5), clock=fixed_clock)
+        with self.assertRaises(ScoringError):
+            neg_engine.process_batch([make_event("evt-neg", event_time=at(9, 0))])
+        self.assertIsNone(neg_engine.state_for(DEFAULT_SCOPE))
+
 
 class ExpiryAndResetTests(unittest.TestCase):
     def test_inactive_context_expires(self) -> None:
@@ -211,6 +263,30 @@ class ExpiryAndResetTests(unittest.TestCase):
 
         self.assertEqual(result.reset_scope_keys, [DEFAULT_SCOPE])
         self.assertEqual(result.cues, [])
+
+    def test_future_event_in_other_scope_does_not_expire_active_scope(self) -> None:
+        engine = SequenceEngine(
+            make_config(state_ttl_seconds=600), ScriptedCueScorer(), clock=fixed_clock
+        )
+        engine.process_batch(
+            [make_event("evt-1", event_time=at(9, 0), event_type=AUTH_FAILURE)]
+        )
+
+        result = engine.process_batch(
+            [
+                make_event("evt-2", event_time=at(9, 5), event_type=PRIV_ESCALATION),
+                make_event(
+                    "evt-other-late",
+                    event_time=at(12, 0),
+                    event_type=AUTH_FAILURE,
+                    scope_key=OTHER_SCOPE,
+                ),
+            ]
+        )
+
+        self.assertEqual(result.expired_scope_keys, [])
+        self.assertEqual(len(result.cues), 1)
+        self.assertEqual(result.cues[0].event_ids, ["evt-1", "evt-2"])
 
 
 if __name__ == "__main__":

@@ -22,6 +22,7 @@ signal for the investigation orchestrator.
 
 from __future__ import annotations
 
+import threading
 from dataclasses import dataclass, field
 from datetime import datetime, timezone
 from typing import Callable, Sequence
@@ -33,7 +34,7 @@ from .config import SequenceConfig
 from .cues import build_cue, build_window_ref
 from .errors import InvalidEventBatchError, StateCorruptionError
 from .features import FeatureExtractor
-from .scoring import SequenceScorer
+from .scoring import SequenceScorer, validate_score
 from .state import InMemoryStateStore, ScopeState, StateStore
 from .window import WindowEntry
 
@@ -47,6 +48,7 @@ class BatchResult:
     #: Late events whose required history is no longer retained, so they could
     #: not be replayed and were not appended to a later state.
     skipped_event_ids: list[str] = field(default_factory=list)
+    duplicate_event_ids: list[str] = field(default_factory=list)
     expired_scope_keys: list[str] = field(default_factory=list)
     reset_scope_keys: list[str] = field(default_factory=list)
     replay_incomplete_scope_keys: list[str] = field(default_factory=list)
@@ -87,6 +89,7 @@ class SequenceEngine:
         self._store: StateStore = store if store is not None else InMemoryStateStore()
         self._extractor = extractor if extractor is not None else FeatureExtractor()
         self._clock = clock if clock is not None else (lambda: datetime.now(timezone.utc))
+        self._lock = threading.RLock()
 
     @property
     def config(self) -> SequenceConfig:
@@ -98,7 +101,8 @@ class SequenceEngine:
 
     def state_for(self, scope_key: str) -> ScopeState | None:
         """Inspect the retained context for one scope (read-only usage)."""
-        return self._store.get(scope_key)
+        with self._lock:
+            return self._store.get(scope_key)
 
     def process_batch(self, events: Sequence[NormalizedEvent]) -> BatchResult:
         """Process one batch, continuing each scope's stored context."""
@@ -114,40 +118,38 @@ class SequenceEngine:
         if not batch:
             return result
 
-        # Inactivity is measured against the newest event in the batch, which
-        # keeps expiry deterministic and based on event time rather than on the
-        # wall clock of whoever processed the batch.
-        batch_watermark = max(event.event_time for event in batch)
-
         grouped: dict[str, list[NormalizedEvent]] = {}
         for event in batch:
             grouped.setdefault(event.scope_key, []).append(event)
 
-        for scope_key in sorted(grouped):
-            state = self._load_state(scope_key, result)
-            state = self._apply_expiry(state, scope_key, batch_watermark, result)
-            if state is None:
-                state = ScopeState(
-                    scope_key=scope_key, model_version=self._config.model_version
-                )
+        with self._lock:
+            for scope_key in sorted(grouped):
+                state = self._load_state(scope_key, result)
 
-            for event in replay.order_events(grouped[scope_key]):
-                self._process_event(state, event, result)
+                for event in replay.order_events(grouped[scope_key]):
+                    state = self._apply_expiry(state, scope_key, event.event_time, result)
+                    if state is None:
+                        state = ScopeState(
+                            scope_key=scope_key, model_version=self._config.model_version
+                        )
+                    self._process_event(state, event, result)
 
-            self._store.put(state)
+                if state is not None:
+                    self._store.put(state)
 
         return result
 
     def expire(self, now: datetime) -> list[str]:
         """Drop context that has been inactive longer than the configured TTL."""
         expired: list[str] = []
-        for scope_key in sorted(self._store.scope_keys()):
-            state = self._store.get(scope_key)
-            if state is None or state.last_event_time is None:
-                continue
-            if self._is_expired(state, now):
-                self._store.delete(scope_key)
-                expired.append(scope_key)
+        with self._lock:
+            for scope_key in sorted(self._store.scope_keys()):
+                state = self._store.get(scope_key)
+                if state is None or state.last_event_time is None:
+                    continue
+                if self._is_expired(state, now):
+                    self._store.delete(scope_key)
+                    expired.append(scope_key)
         return expired
 
     # ---------------------------------------------------------------- state
@@ -189,7 +191,8 @@ class SequenceEngine:
         if not self._is_expired(state, now):
             return state
         self._store.delete(scope_key)
-        result.expired_scope_keys.append(scope_key)
+        if scope_key not in result.expired_scope_keys:
+            result.expired_scope_keys.append(scope_key)
         return self._fresh_state(scope_key, "ttl-expired")
 
     def _is_expired(self, state: ScopeState, now: datetime) -> bool:
@@ -203,7 +206,10 @@ class SequenceEngine:
     def _process_event(
         self, state: ScopeState, event: NormalizedEvent, result: BatchResult
     ) -> None:
-        if state.last_event_time is not None and event.event_time < state.last_event_time:
+        if any(entry.event.event_id == event.event_id for entry in state.entries):
+            result.duplicate_event_ids.append(event.event_id)
+            return
+        if state.entries and (event.event_time, event.event_id) < state.entries[-1].ordering_key:
             self._replay_late_event(state, event, result)
             return
         self._append_event(state, event, result)
@@ -217,7 +223,8 @@ class SequenceEngine:
             previous_event_time=state.last_event_time,
             window_observations=replay.observations(state.entries),
         )
-        state_after, score = self._scorer.step(state_before, observation)
+        state_after, raw_score = self._scorer.step(state_before, observation)
+        score = validate_score(raw_score)
 
         state.entries.append(
             WindowEntry(
@@ -255,6 +262,7 @@ class SequenceEngine:
                 result.replay_incomplete_scope_keys.append(state.scope_key)
             return
 
+        previous_scores = {entry.event.event_id: entry.score for entry in state.entries}
         anchor = state.anchor_state or self._scorer.initial_state()
         candidates = [entry.event for entry in state.entries]
         candidates.append(event)
@@ -273,18 +281,38 @@ class SequenceEngine:
         state.replay_incomplete = False
 
         result.processed_event_ids.append(event.event_id)
-        score = replay.score_for_event(state.entries, event.event_id)
-        if score is not None:
-            self._emit_cue_if_crossed(state, score, result)
+        inserted_idx = next(
+            (
+                idx
+                for idx, entry in enumerate(state.entries)
+                if entry.event.event_id == event.event_id
+            ),
+            0,
+        )
+        for idx in range(inserted_idx, len(state.entries)):
+            entry = state.entries[idx]
+            if entry.score >= self._config.threshold and (
+                entry.event.event_id == event.event_id
+                or previous_scores.get(entry.event.event_id, -1.0) < self._config.threshold
+            ):
+                self._emit_cue_if_crossed(
+                    state, entry.score, result, entries=state.entries[: idx + 1]
+                )
 
     # ---------------------------------------------------------------- cues
 
     def _emit_cue_if_crossed(
-        self, state: ScopeState, score: float, result: BatchResult
+        self,
+        state: ScopeState,
+        score: float,
+        result: BatchResult,
+        *,
+        entries: Sequence[WindowEntry] | None = None,
     ) -> None:
         if score < self._config.threshold:
             return
-        event_ids = state.event_ids
+        active_entries = list(entries) if entries is not None else state.entries
+        event_ids = window.window_event_ids(active_entries)
         if not event_ids:
             return
         result.cues.append(
@@ -295,7 +323,7 @@ class SequenceEngine:
                 threshold=self._config.threshold,
                 model_version=self._config.model_version,
                 window_ref=build_window_ref(
-                    state.scope_key, window.window_start(state.entries)
+                    state.scope_key, window.window_start(active_entries)
                 ),
                 created_at=self._clock(),
             )

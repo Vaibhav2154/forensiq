@@ -25,7 +25,7 @@ decisions.
 
 from __future__ import annotations
 
-from .config import SequenceConfig
+from .config import SequenceConfig, SequenceSettings
 from .cues import build_cue, build_cue_id, build_window_ref
 from .engine import BatchResult, SequenceEngine
 from .errors import (
@@ -36,9 +36,16 @@ from .errors import (
     StateCorruptionError,
 )
 from .features import CONTEXT_FEATURE_KEYS, EventObservation, FeatureExtractor
+from .provider import (
+    SequenceEngineCueProvider,
+    build_default_sequence_engine,
+    load_lstm_scorer,
+)
 from .replay import order_events, rebuild_window
 from .scoring import LstmCellScorer, LstmState, SequenceScorer, validate_score
+from .sqlite_store import SQLiteStateStore
 from .state import STATE_FORMAT_VERSION, InMemoryStateStore, ScopeState, StateStore
+from .vectorizer import VECTOR_SIZE, vectorize_observation
 
 __all__ = [
     "BatchResult",
@@ -50,19 +57,26 @@ __all__ = [
     "LstmCellScorer",
     "LstmState",
     "STATE_FORMAT_VERSION",
+    "SQLiteStateStore",
     "ScoringError",
     "ScopeState",
     "SequenceConfig",
     "SequenceConfigError",
     "SequenceEngine",
+    "SequenceEngineCueProvider",
     "SequenceError",
     "SequenceScorer",
+    "SequenceSettings",
     "StateCorruptionError",
     "StateStore",
+    "VECTOR_SIZE",
     "build_cue",
     "build_cue_id",
+    "build_default_sequence_engine",
     "build_window_ref",
+    "load_lstm_scorer",
     "order_events",
     "rebuild_window",
     "validate_score",
+    "vectorize_observation",
 ]
