@@ -177,3 +177,5 @@ cython_debug/
 # PyPI configuration file
 .pypirc/
 chroma_db/
+.forensiq_knowledge/
+.cognee_system/

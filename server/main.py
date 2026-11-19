@@ -7,22 +7,25 @@ from contextlib import asynccontextmanager
 from datetime import datetime
 from core import Config, logger
 from services import GeminiService, ChromaDBService, AWSBedrockService
-from routers import auth, users, analysis_router, mitre
+from services.knowledge import KnowledgeService
+from routers import auth, users, analysis_router, mitre, knowledge_router
 from routers import monitoring
 from routers.analysis import set_services
 from routers.mitre import set_mitre_services
+from routers.knowledge import set_knowledge_service
 from model import HealthCheck, ErrorResponse, DatabaseStats
 
 gemini_service: GeminiService = None
 chromadb_service: ChromaDBService = None
 aws_bedrock_service: AWSBedrockService = None
+knowledge_service: KnowledgeService = None
 
 @asynccontextmanager
 async def lifespan(app: FastAPI):
     """Manage application lifespan - startup and shutdown events."""
     logger.info("Starting LogIQ API server...")
     try:
-        global gemini_service, chromadb_service, aws_bedrock_service
+        global gemini_service, chromadb_service, aws_bedrock_service, knowledge_service
         logger.info("Initializing Gemini AI service...")
         gemini_service = GeminiService()
         logger.info("Initializing ChromaDB service...")
@@ -37,11 +40,24 @@ async def lifespan(app: FastAPI):
         # Set services for routers
         set_services(gemini_service, chromadb_service)
         set_mitre_services(aws_bedrock_service, chromadb_service, gemini_service)
+        try:
+            logger.info("Initializing ForensIQ knowledge service (KCP/OKF/Cognee)...")
+            knowledge_service = KnowledgeService()
+            await knowledge_service.initialize()
+            set_knowledge_service(knowledge_service)
+        except Exception as k_exc:
+            logger.warning(f"Knowledge service initialization degraded: {str(k_exc)}")
+            knowledge_service = None
         logger.info("All services initialized successfully")
     except Exception as e:
         logger.error(f"Failed to initialize services: {str(e)}")
         raise
     yield
+    if knowledge_service is not None:
+        try:
+            await knowledge_service.close()
+        except Exception as k_exc:
+            logger.warning(f"Error closing knowledge service: {str(k_exc)}")
     logger.info("Shutting down LogIQ API server...")
 
 app = FastAPI(
@@ -67,6 +83,7 @@ app.include_router(users.router)
 app.include_router(analysis_router)
 app.include_router(monitoring.router)
 app.include_router(mitre.router)
+app.include_router(knowledge_router)
 
 @app.get("/", response_model=dict)
 async def root():
@@ -114,6 +131,9 @@ async def health_check():
         else:
             services_status["chromadb"] = "not_initialized"
             db_stats = None
+        services_status["knowledge"] = (
+            "healthy" if knowledge_service else "not_initialized"
+        )
         # Determine overall status
         overall_status = "healthy" if all(
             status == "healthy" for status in services_status.values()
