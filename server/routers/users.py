@@ -5,9 +5,9 @@ from bson import ObjectId
 
 from core import security
 from core.config import settings
-from forensiq.server.model.users import UserBase,UserUpdate,PasswordChange,UserUpdateUsername
+from model.users import UserBase,UserUpdate,PasswordChange,UserUpdateUsername
 from db import database
-from forensiq.server.routers.auth import get_current_user
+from routers.auth import get_current_user
 
 router = APIRouter(prefix="/users", tags=["Users"])
 

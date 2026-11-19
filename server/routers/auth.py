@@ -3,7 +3,7 @@ from fastapi.security import OAuth2PasswordBearer,OAuth2PasswordRequestForm
 from jose import JWTError, jwt
 from core import  security
 from core.config import settings
-from forensiq.server.model.users import UserBase,UserCreate,UserInDB,Token,TokenData,LoginRequest
+from model.users import UserBase,UserCreate,UserInDB,Token,TokenData,LoginRequest
 from db import database
 
 router = APIRouter(tags=["Authentication"])
