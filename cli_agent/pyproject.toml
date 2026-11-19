@@ -1,0 +1,37 @@
+[build-system]
+requires = ["setuptools>=68"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "forensiq-cli"
+version = "0.1.0"
+description = "ForensIQ command-line client: authenticated system-log monitoring and analysis"
+readme = "README.md"
+requires-python = ">=3.11"
+license = { text = "MIT" }
+dependencies = [
+    "aiohttp>=3.9",
+    "aiofiles>=23.0",
+    "cryptography>=41.0",
+    "requests>=2.31",
+    "rich>=13.0",
+    "schedule>=1.2",
+]
+
+[project.optional-dependencies]
+dev = [
+    "pytest>=8.0",
+    "pytest-asyncio>=0.24",
+]
+
+[project.scripts]
+forensiq = "cli_agent.cli:main"
+# Legacy command surface, kept for compatibility with existing LogIQ users.
+forensiq-legacy = "cli_agent.legacy.cli_tool:main"
+
+[tool.setuptools]
+package-dir = { "" = ".." }
+
+[tool.setuptools.packages.find]
+where = [".."]
+include = ["cli_agent*"]

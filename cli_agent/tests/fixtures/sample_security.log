@@ -1,0 +1,10 @@
+2025-08-29 17:18:00 INFO Application started successfully
+2025-08-29 17:18:05 WARNING Configuration file not found, using defaults
+2025-08-29 17:18:10 ERROR Failed to connect to database: Connection timeout
+2025-08-29 17:18:15 INFO Retrying database connection
+2025-08-29 17:18:20 INFO Database connection established
+2025-08-29 17:18:25 INFO User authentication: user=admin, status=success
+2025-08-29 17:18:30 WARNING Multiple failed login attempts detected for user=testuser
+2025-08-29 17:18:35 ERROR Security alert: Unusual access pattern detected
+2025-08-29 17:18:40 INFO System health check completed successfully
+2025-08-29 17:18:45 INFO Application running normally
