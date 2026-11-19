@@ -31,6 +31,7 @@ from cli_agent.services.cli_service import CliService
 from cli_agent.services.collector_service import CollectorService
 from cli_agent.services.config_service import ConfigService
 from cli_agent.tui.app import ForensIQApp
+from cli_agent.tui.theme import FORENSIQ_THEME
 
 from .conftest import FakeExtractor, FakeTransport
 
@@ -71,19 +72,22 @@ import asyncio
 asyncio.run(main())
 """
 
+# Latest approved reference screenshot.
 REQUIRED_PALETTE = {
-    "#080C0A",  # main background
-    "#101713",  # panel background
-    "#00C853",  # primary green
-    "#39FF88",  # bright green
-    "#4B8061",  # muted green
-    "#176B3A",  # selection
-    "#E0E8E2",  # main text
-    "#91A598",  # secondary text
-    "#E5B94B",  # warning
-    "#F06464",  # error
-    "#5CC8D7",  # information
+    "#000000",  # main background: cards, panels, stream
+    "#1A1A1A",  # sidebar
+    "#101010",  # header / footer charcoal
+    "#4B6550",  # thin muted olive/sage borders
+    "#00C853",  # bright-green headings
+    "#C5C5C5",  # normal text
+    "#808080",  # secondary text
+    "#E5B94B",  # warning / status
+    "#F06464",  # errors
+    "#0078D4",  # selected sidebar item
+    "#0B4F4F",  # selected table row (dark teal)
 }
+# Colours from the earlier green-tinted theme that must not come back.
+SUPERSEDED_COLOURS = ("#080C0A", "#101713", "#39FF88", "#4B8061", "#176B3A", "#E0E8E2", "#91A598")
 PREVIEW_ONLY_COLOURS = ("#0b1020", "#131a2e", "#7fe3c0", "#101830", "#1d2a47")
 
 
@@ -211,15 +215,99 @@ def test_preview_baseline_is_still_the_mock_shell() -> None:
 
 
 def test_palette_is_centralised_and_complete() -> None:
-    stylesheet = (TUI_DIR / "styles.tcss").read_text(encoding="utf-8")
-    upper = stylesheet.upper()
-    for colour in REQUIRED_PALETTE:
-        assert colour in upper, f"palette colour {colour} missing from styles.tcss"
+    """One palette module; the stylesheet only references semantic variables."""
     assert ForensIQApp.CSS_PATH == "styles.tcss"
 
-    # The preview's navy dev-theme colours must not survive in the app.
+    theme_source = (TUI_DIR / "theme.py").read_text(encoding="utf-8").upper()
+    for colour in REQUIRED_PALETTE:
+        assert colour.upper() in theme_source, f"palette colour {colour} missing from theme.py"
+
+    # The approved theme defines every semantic variable the CSS can use.
+    for variable in (
+        "fq-canvas", "fq-surface", "fq-chrome", "fq-sidebar", "fq-border",
+        "fq-heading", "fq-text", "fq-muted", "fq-nav-selected",
+        "fq-cursor-bg", "fq-button-bg", "fq-scrollbar",
+    ):
+        assert variable in FORENSIQ_THEME.variables, variable
+
+    stylesheet = (TUI_DIR / "styles.tcss").read_text(encoding="utf-8")
+    upper = stylesheet.upper()
+
+    # Hard-coded colours were the root cause of partial theme switching.
+    assert not re.search(r"#[0-9A-Fa-f]{3,8}\b", stylesheet), "styles.tcss must not hard-code colours"
+    assert "$fq-" in stylesheet
+
+    # The preview's navy dev-theme colours must not survive anywhere.
     for colour in PREVIEW_ONLY_COLOURS:
         assert colour.upper() not in upper
+        assert colour.upper() not in theme_source
+
+    # The earlier green-tinted theme (green panel fills, bright-green borders)
+    # must not leak back in.
+    for colour in SUPERSEDED_COLOURS:
+        assert colour.upper() not in upper, f"superseded colour {colour} still present"
+        assert colour.upper() not in theme_source
+
+
+async def test_rendered_palette_matches_the_reference(tmp_path) -> None:
+    """Read colours off the mounted widgets, not just the stylesheet text."""
+    app = build_app(tmp_path)
+    async with app.run_test(size=(120, 40)) as pilot:
+        await pilot.pause()
+
+        def background(selector: str) -> str:
+            return app.query_one(selector).styles.background.hex.upper()
+
+        def colour(selector: str) -> str:
+            return app.query_one(selector).styles.color.hex.upper()
+
+        # Built-in Textual theme replaced, not layered over.
+        assert app.theme == "forensiq"
+
+        assert app.screen.styles.background.hex.upper() == "#000000"
+        assert app.screen.styles.color.hex.upper() == "#C5C5C5"
+        assert background("#sidebar") == "#1A1A1A"
+        assert background("Header") == "#101010"
+        assert background("Footer") == "#101010"
+
+        # No green panel fills anywhere in the shell.
+        for selector in ("#card-auth", "#card-mon", "#monitor-panel", "#technique-panel", "#stream-panel"):
+            assert background(selector) == "#000000", selector
+
+        # Cards use normal light-gray text; panel labels use sage-muted text
+        # and bright-green headings.
+        assert colour("#card-auth") == "#C5C5C5"
+        assert colour("#monitor-detail") == "#808080"
+        assert colour("#technique-heading") == "#00C853"
+
+        # Thin sage borders around the panels and cards.
+        border_style, border_colour = app.query_one("#monitor-panel").styles.border_top
+        assert border_style == "round"
+        assert border_colour.hex.upper() == "#4B6550"
+
+        # Neutral charcoal buttons even for the success/error variants.
+        for selector in ("#btn-start", "#btn-stop", "#btn-tick"):
+            assert background(selector) == "#000000", selector
+
+        # Selected sidebar destination: blue with white text.
+        selected = app.query_one("#nav-dashboard")
+        assert "-highlight" in selected.classes
+        assert background("#nav-dashboard") == "#0078D4"
+        assert colour("#nav-dashboard") == "#FFFFFF"
+
+    # Rendered screenshot: black dominates, teal cursor is actually painted.
+    # The cursor is deliberately muted while the table is unfocused, so focus
+    # it first to capture the actively selected row.
+    app = build_app(tmp_path)
+    async with app.run_test(size=(120, 40)) as pilot:
+        await pilot.pause()
+        app.query_one("#techniques").focus()
+        await pilot.pause()
+        svg = app.export_screenshot(title="ForensIQ palette")
+        lowered = svg.lower()
+        assert "#000000" in lowered
+        assert "#0b4f4f" in lowered  # selected table row
+        assert "#0078d4" in lowered  # selected sidebar item
 
 
 def test_app_module_holds_no_layout_styling_beyond_structure() -> None:

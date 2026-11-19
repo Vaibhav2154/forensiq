@@ -38,8 +38,10 @@ Deliberate layout additions (all inside the existing regions, recorded in
 from __future__ import annotations
 
 import asyncio
+import os
 import platform as platform_module
 import time
+from collections import deque
 from datetime import datetime, timezone
 from urllib.parse import urlsplit
 
@@ -67,6 +69,7 @@ from ..services.errors import ConfigurationError, ForensIQError
 from ..services.monitoring_service import CycleOutcome, MonitoringState
 from ..services.response_adapter import AnalysisView, adapt_analysis
 from .state import AppState, BackendStatus, CycleRecord
+from .theme import FORENSIQ_THEME, THEME_NAME, rich_colour, theme_variable_defaults
 
 NAV_ITEMS = [
     ("dashboard", "Dashboard", "Operational overview"),
@@ -96,12 +99,6 @@ PANEL_HEADINGS = {
     "settings": ("CONFIGURATION", "ACCOUNT"),
 }
 
-# Colour roles, mirrored in styles.tcss (RichLog markup cannot use CSS vars).
-OK = "#39FF88"
-WARN = "#E5B94B"
-BAD = "#F06464"
-INFO = "#5CC8D7"
-MUTED = "#91A598"
 TECHNIQUE_ROWS = 25
 ROW_LIMIT = 50
 
@@ -220,6 +217,7 @@ class ForensIQApp(App):
         self._probe_inflight = False
         self._compact = False
         self._closing = False
+        self._stream_history: deque[tuple[tuple[str, str], ...]] = deque(maxlen=200)
 
     # -- layout (approved preview shell, content regions filled per page) --
     def compose(self) -> ComposeResult:
@@ -282,6 +280,15 @@ class ForensIQApp(App):
 
     # -- startup ----------------------------------------------------------
     def on_mount(self) -> None:
+        # Register the approved reference palette, then make it the default.
+        # An explicit persisted preference (FORENSIQ_THEME or Textual's own
+        # TEXTUAL_THEME) wins; otherwise the black theme is applied before the
+        # first paint and every widget derives from it.
+        self.register_theme(FORENSIQ_THEME)
+        self.theme_changed_signal.subscribe(self, self._theme_changed)
+        preferred = os.environ.get("FORENSIQ_THEME") or os.environ.get("TEXTUAL_THEME")
+        self.theme = preferred if preferred in self.available_themes else THEME_NAME
+
         table = self.query_one("#techniques", DataTable)
         table.add_columns("ID", "Technique", "Score")
         self._table_shape = ("ID", "Technique", "Score")
@@ -292,12 +299,12 @@ class ForensIQApp(App):
         self.state.interval_seconds = self.service.config.interval_seconds
         self.state.sources = tuple(self.service.config.sources)
 
-        self._write_stream(f"[{MUTED}]forensiq {escape(self.service.config.base_url)}[/{MUTED}]")
+        self._write_stream(("muted", f"forensiq {escape(self.service.config.base_url)}"))
         if self._restore_on_start:
             self._restore_session()
         else:
             self.state.note("not signed in - press l to sign in", "warn")
-            self._write_stream(f"[{WARN}]not signed in - press l to sign in[/{WARN}]")
+            self._write_stream(("warn", "not signed in - press l to sign in"))
         self._sync_state()
         self._render_page()
 
@@ -539,18 +546,71 @@ class ForensIQApp(App):
                 return value[:19]
         return value.astimezone().strftime("%H:%M:%S")
 
-    def _write_stream(self, markup: str) -> None:
+    def get_theme_variable_defaults(self) -> dict[str, str]:
+        """CSS/Markup fallbacks for every theme, including Textual's built-ins.
+
+        Textual calls this whenever it rebuilds the variable table, so the
+        `fq-*` variables used by styles.tcss always resolve. FORENSIQ_THEME's
+        explicit values still win.
+        """
+        return theme_variable_defaults(self.current_theme)
+
+    def _colour(self, role: str) -> str:
+        """Concrete colour for a Rich markup role in the active theme."""
+        return rich_colour(self.current_theme, role)
+
+    def _write_stream(self, *segments: tuple[str, str]) -> None:
+        """Append a themed stream line.
+
+        A line is a sequence of ``(role, text)`` segments. Keeping roles rather
+        than baked-in colours lets a theme switch recolor the whole backlog.
+        """
+        self._stream_history.append(tuple(segments))
+        self._write_segments(segments)
+
+    def _write_segments(self, segments: tuple[tuple[str, str], ...]) -> None:
         try:
-            self.query_one("#stream", RichLog).write(markup)
+            log = self.query_one("#stream", RichLog)
         except Exception:  # pragma: no cover - during teardown
-            pass
+            return
+        markup = " ".join(
+            f"[{self._colour(role)}]{text}[/{self._colour(role)}]"
+            for role, text in segments
+            if text
+        )
+        if markup:
+            log.write(markup)
+
+    def _redraw_stream(self) -> None:
+        """Re-render the stream backlog with the active theme's colours."""
+        try:
+            log = self.query_one("#stream", RichLog)
+        except Exception:  # pragma: no cover - during teardown
+            return
+        log.clear()
+        for segments in self._stream_history:
+            self._write_segments(segments)
+
+    def _theme_changed(self, _theme) -> None:
+        """Textual signal: the whole application must adopt the new theme."""
+        if getattr(self, "_closing", False) or not self.is_mounted:
+            return
+        # The signal is published right after Textual reparses the CSS, so the
+        # new variables are ready for Rich markup by the time this runs.
+        self.call_after_refresh(self._apply_theme_refresh)
+
+    def _apply_theme_refresh(self) -> None:
+        if getattr(self, "_closing", False):
+            return
+        self._render_page()
+        self._redraw_stream()
 
     def _notify(self, message: str, colour_role: str = "info") -> None:
         """Operational feedback: shared state + the existing event stream."""
         self.state.note(message, colour_role)
-        colour = {"ok": OK, "warn": WARN, "bad": BAD, "info": INFO}.get(colour_role, INFO)
+        role = colour_role if colour_role in ("ok", "warn", "bad", "info") else "info"
         stamp = datetime.now().strftime("%H:%M:%S")
-        self._write_stream(f"[{MUTED}]{stamp}[/{MUTED}] [{colour}]{escape(message)}[/{colour}]")
+        self._write_stream(("muted", stamp), (role, escape(message)))
 
     # -- rendering --------------------------------------------------------
     def _render_page(self) -> None:
@@ -580,29 +640,29 @@ class ForensIQApp(App):
     def _render_cards(self) -> None:
         st = self.state
         backend = st.backend
-        backend_colour = {"online": OK, "degraded": WARN, "offline": BAD}.get(backend.state, MUTED)
+        backend_colour = {"online": self._colour('ok'), "degraded": self._colour('warn'), "offline": self._colour('bad')}.get(backend.state, self._colour('muted'))
         host = urlsplit(self.service.config.base_url).netloc or self.service.config.base_url
         latency = f" ({backend.latency_ms:.0f}ms)" if backend.latency_ms is not None else ""
         auth_text = escape(st.username) if st.username else "signed out"
-        auth_colour = OK if st.authenticated else WARN
+        auth_colour = self._colour('ok') if st.authenticated else self._colour('warn')
         state_colour = {
-            "running": OK,
-            "starting": INFO,
-            "stopping": WARN,
-            "error": BAD,
-        }.get(st.monitoring_state, WARN)
+            "running": self._colour('ok'),
+            "starting": self._colour('info'),
+            "stopping": self._colour('warn'),
+            "error": self._colour('bad'),
+        }.get(st.monitoring_state, self._colour('warn'))
 
         self.query_one("#card-auth", Static).update(
-            f"[{MUTED}]AUTH[/{MUTED}]\n[{auth_colour}]{auth_text}[/{auth_colour}]"
+            f"[{self._colour('muted')}]AUTH[/{self._colour('muted')}]\n[{auth_colour}]{auth_text}[/{auth_colour}]"
         )
         self.query_one("#card-backend", Static).update(
-            f"[{MUTED}]BACKEND[/{MUTED}]\n[{backend_colour}]{backend.label}{latency}[/{backend_colour}] {escape(host)}"
+            f"[{self._colour('muted')}]BACKEND[/{self._colour('muted')}]\n[{backend_colour}]{backend.label}{latency}[/{backend_colour}] {escape(host)}"
         )
         self.query_one("#card-mon", Static).update(
-            f"[{MUTED}]MONITORING[/{MUTED}]\n[{state_colour}]{st.monitoring_state}[/{state_colour}]"
+            f"[{self._colour('muted')}]MONITORING[/{self._colour('muted')}]\n[{state_colour}]{st.monitoring_state}[/{state_colour}]"
         )
         self.query_one("#card-batches", Static).update(
-            f"[{MUTED}]BATCHES[/{MUTED}]\n{st.submitted} submitted"
+            f"[{self._colour('muted')}]BATCHES[/{self._colour('muted')}]\n{st.submitted} submitted"
         )
 
     def _source_label(self) -> str:
@@ -629,11 +689,11 @@ class ForensIQApp(App):
     def _monitor_markup(self) -> str:
         st = self.state
         state_colour = {
-            "running": OK,
-            "starting": INFO,
-            "stopping": WARN,
-            "error": BAD,
-        }.get(st.monitoring_state, WARN)
+            "running": self._colour('ok'),
+            "starting": self._colour('info'),
+            "stopping": self._colour('warn'),
+            "error": self._colour('bad'),
+        }.get(st.monitoring_state, self._colour('warn'))
         lines = [
             f"state        [{state_colour}]{st.monitoring_state}[/{state_colour}]",
             f"session id   {escape(st.session_id) if st.session_id else 'No data'}",
@@ -695,7 +755,7 @@ class ForensIQApp(App):
                 f"ai enhance   {'on' if self.service.config.enhance_with_ai else 'off'}",
             ]
         if st.loading:
-            lines.append(f"[{INFO}]loading {escape(', '.join(sorted(st.loading)))}...[/{INFO}]")
+            lines.append(f"[{self._colour('info')}]loading {escape(', '.join(sorted(st.loading)))}...[/{self._colour('info')}]")
         return "\n".join(lines)
 
     def _detail_markup(self) -> str:
@@ -708,25 +768,25 @@ class ForensIQApp(App):
                 else "No data"
             )
             lines = [
-                f"[{MUTED}]health[/{MUTED}]       {escape(summary)}",
-                f"[{MUTED}]platform[/{MUTED}]     {escape(st.platform or 'Unknown')}",
-                f"[{MUTED}]collected[/{MUTED}]    {st.collected_entries} event(s)",
-                f"[{MUTED}]submitted[/{MUTED}]    {st.submitted_entries} event(s)",
+                f"[{self._colour('muted')}]health[/{self._colour('muted')}]       {escape(summary)}",
+                f"[{self._colour('muted')}]platform[/{self._colour('muted')}]     {escape(st.platform or 'Unknown')}",
+                f"[{self._colour('muted')}]collected[/{self._colour('muted')}]    {st.collected_entries} event(s)",
+                f"[{self._colour('muted')}]submitted[/{self._colour('muted')}]    {st.submitted_entries} event(s)",
             ]
             if st.collector_error:
-                lines.append(f"[{BAD}]collector: {escape(st.collector_error[:60])}[/{BAD}]")
+                lines.append(f"[{self._colour('bad')}]collector: {escape(st.collector_error[:60])}[/{self._colour('bad')}]")
             return "\n".join(lines)
         if self.view == "monitoring":
             recent = list(st.events)[-3:]
-            lines = [f"[{MUTED}]next cycle in {st.interval_seconds}s while running[/{MUTED}]"]
+            lines = [f"[{self._colour('muted')}]next cycle in {st.interval_seconds}s while running[/{self._colour('muted')}]"]
             for event in recent:
                 lines.append(
-                    f"[{MUTED}]{event.at.strftime('%H:%M:%S')}[/{MUTED}] {escape(event.message[:52])}"
+                    f"[{self._colour('muted')}]{event.at.strftime('%H:%M:%S')}[/{self._colour('muted')}] {escape(event.message[:52])}"
                 )
             return "\n".join(lines)
         if self.view == "analysis":
             if st.analysis_error:
-                return f"[{BAD}]{escape(st.analysis_error)}[/{BAD}]"
+                return f"[{self._colour('bad')}]{escape(st.analysis_error)}[/{self._colour('bad')}]"
             if st.latest_analysis is None:
                 return (
                     "No analysis available.\n\n"
@@ -735,17 +795,17 @@ class ForensIQApp(App):
                 )
             stamp = st.latest_analysis.raw.get("analysis_timestamp") if st.latest_analysis.raw else None
             captured = self._fmt_time(stamp if isinstance(stamp, str) else None)
-            return f"[{MUTED}]source[/{MUTED}] backend /api/v1/latest\n[{MUTED}]captured[/{MUTED}] {escape(captured)}"
+            return f"[{self._colour('muted')}]source[/{self._colour('muted')}] backend /api/v1/latest\n[{self._colour('muted')}]captured[/{self._colour('muted')}] {escape(captured)}"
         if self.view == "knowledge":
             if st.knowledge_error:
-                return f"[{BAD}]{escape(st.knowledge_error)}[/{BAD}]"
+                return f"[{self._colour('bad')}]{escape(st.knowledge_error)}[/{self._colour('bad')}]"
             return (
                 "Search the backend knowledge store. The CLI never invents\n"
                 "records: an empty store returns zero hits."
             )
         if self.view == "sessions":
             if st.sessions_error:
-                return f"[{BAD}]{escape(st.sessions_error)}[/{BAD}]"
+                return f"[{self._colour('bad')}]{escape(st.sessions_error)}[/{self._colour('bad')}]"
             return (
                 "Session rows are owned by the backend. Started/stopped times\n"
                 "come from the API response; no local history is kept."
@@ -1014,8 +1074,9 @@ class ForensIQApp(App):
         summary = (view.summary or "").strip().replace("\n", " ")
         detail = f" - {escape(summary)[:70]}" if summary else ""
         self._write_stream(
-            f"[{MUTED}]{stamp}[/{MUTED}] [{INFO}]cycle {outcome.cycle}[/{INFO}] "
-            f"{outcome.collected_entries} event(s) submitted{detail}"
+            ("muted", stamp),
+            ("info", f"cycle {outcome.cycle}"),
+            ("text", f"{outcome.collected_entries} event(s) submitted{detail}"),
         )
         for technique in view.techniques[:3]:
             label = technique.technique_id or "?"
@@ -1025,9 +1086,7 @@ class ForensIQApp(App):
                 if isinstance(technique.relevance_score, float)
                 else ""
             )
-            self._write_stream(
-                f"[{MUTED}]             {escape(label)} {escape(name)}{score}[/{MUTED}]"
-            )
+            self._write_stream(("muted", f"             {escape(label)} {escape(name)}{score}"))
         if view.summary:
             self._notify(f"analysis: {view.summary.strip()[:90]}", "info")
 
@@ -1241,7 +1300,7 @@ class ForensIQApp(App):
         if self._closing:
             return
         self._closing = True
-        self._write_stream(f"[{MUTED}]shutting down...[/{MUTED}]")
+        self._write_stream(("muted", "shutting down..."))
         try:
             await asyncio.wait_for(self.service.close(), timeout=15)
         except asyncio.TimeoutError:
