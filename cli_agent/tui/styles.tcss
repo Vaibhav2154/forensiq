@@ -7,7 +7,7 @@
  *
  * Palette
  *   background        #080C0A
- *   panel             #101713
+ *   panel             #121815ff
  *   primary green     #00C853
  *   bright green      #39FF88   active / focused / selected
  *   muted green       #4B8061   borders and separators
@@ -20,7 +20,7 @@
  */
 
 Screen {
-    background: #080C0A;
+    background: #000000ff;
     color: #E0E8E2;
 }
 
@@ -104,7 +104,7 @@ ListItem.--highlight {
 #monitor-panel {
     width: 44;
     border: round #4B8061;
-    background: #101713;
+    background: #000000ff;
     padding: 1;
     margin-right: 1;
 }
@@ -215,3 +215,49 @@ LoginScreen {
 #login-actions { height: 3; margin-top: 1; }
 
 #login-error { color: #F06464; height: 1; }
+
+/* Phase 6: page content lives inside the approved regions. Sizes here are
+ * content affordances only; the shell (sidebar, cards, panels, stream) keeps
+ * the preview's dimensions. */
+#page-detail {
+    height: 1fr;
+    margin-top: 1;
+    scrollbar-size: 1 1;
+}
+
+.field-label {
+    color: #91A598;
+    padding: 1 0 0 0;
+}
+
+#settings-form { height: auto; }
+#settings-form Input { width: 100%; }
+
+#knowledge-form { height: 3; }
+#knowledge-form Input { width: 1fr; }
+
+#form-error {
+    color: #F06464;
+    height: auto;
+    padding: 1 0 0 0;
+}
+
+#detail-view {
+    display: none;
+    height: 1fr;
+    background: #080C0A;
+    color: #E0E8E2;
+    border-top: solid #4B8061;
+    margin-top: 1;
+}
+
+Checkbox {
+    background: #101713;
+    color: #E0E8E2;
+    padding: 1 0 0 0;
+}
+
+Checkbox > .toggle--button {
+    background: #176B3A;
+    color: #39FF88;
+}

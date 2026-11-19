@@ -68,7 +68,7 @@ def note_text(app: ForensIQApp) -> str:
 async def test_signed_out_app_blocks_monitoring(tmp_path) -> None:
     transport = FakeTransport()
     service = build_service(tmp_path, transport, session=False)
-    app = ForensIQApp(service=service)
+    app = ForensIQApp(service=service, auto_probe=False)
     async with app.run_test(size=SIZE) as pilot:
         await pilot.pause()
         assert "signed out" in card(app, 0)
@@ -83,7 +83,7 @@ async def test_signed_out_app_blocks_monitoring(tmp_path) -> None:
 
 async def test_restored_session_is_shown(tmp_path) -> None:
     service = build_service(tmp_path, FakeTransport())
-    app = ForensIQApp(service=service)
+    app = ForensIQApp(service=service, auto_probe=False)
     async with app.run_test(size=SIZE) as pilot:
         await pilot.pause()
         assert "analyst" in card(app, 0)
@@ -92,7 +92,7 @@ async def test_restored_session_is_shown(tmp_path) -> None:
 
 async def test_login_modal_authenticates_and_dismisses(tmp_path) -> None:
     service = build_service(tmp_path, FakeTransport().queue({"access_token": make_jwt()}), session=False)
-    app = ForensIQApp(service=service)
+    app = ForensIQApp(service=service, auto_probe=False)
     async with app.run_test(size=SIZE) as pilot:
         await pilot.press("l")
         await pilot.pause()
@@ -111,7 +111,7 @@ async def test_login_modal_authenticates_and_dismisses(tmp_path) -> None:
 
 async def test_failed_login_reports_error_without_leaking_password(tmp_path) -> None:
     service = build_service(tmp_path, FakeTransport().queue((401, {"detail": "bad credentials"})), session=False)
-    app = ForensIQApp(service=service)
+    app = ForensIQApp(service=service, auto_probe=False)
     async with app.run_test(size=SIZE) as pilot:
         await pilot.press("l")
         await pilot.pause()
@@ -131,7 +131,7 @@ async def test_failed_login_reports_error_without_leaking_password(tmp_path) -> 
 async def test_logout_stops_monitoring_and_clears_token(tmp_path) -> None:
     transport = FakeTransport().queue({"session_id": "s-1"})
     service = build_service(tmp_path, transport)
-    app = ForensIQApp(service=service)
+    app = ForensIQApp(service=service, auto_probe=False)
     async with app.run_test(size=SIZE) as pilot:
         await pilot.press("s")
         assert await wait_for(lambda: service.monitoring is not None)
@@ -154,7 +154,7 @@ async def test_configuration_is_loaded_and_applied(tmp_path) -> None:
     )
     transport = FakeTransport().queue({"session_id": "s-1"})
     service = build_service(tmp_path, transport, config=config)
-    app = ForensIQApp(service=service)
+    app = ForensIQApp(service=service, auto_probe=False)
     async with app.run_test(size=SIZE) as pilot:
         await pilot.pause()
         assert "10.0.0.5:9000" in card(app, 1)
@@ -169,7 +169,7 @@ async def test_configuration_is_loaded_and_applied(tmp_path) -> None:
 async def test_settings_view_reports_live_configuration(tmp_path) -> None:
     config = ClientConfig(interval_seconds=120, max_results=3, sources=("auth_logs",))
     service = build_service(tmp_path, FakeTransport(), config=config)
-    app = ForensIQApp(service=service)
+    app = ForensIQApp(service=service, auto_probe=False)
     async with app.run_test(size=SIZE) as pilot:
         await pilot.press("6")
         await pilot.pause()
@@ -180,14 +180,19 @@ async def test_settings_view_reports_live_configuration(tmp_path) -> None:
         assert "auth_logs" in note
 
 
-async def test_views_become_placeholders_without_layout_changes(tmp_path) -> None:
+async def test_each_view_has_its_own_heading_and_content(tmp_path) -> None:
+    """Phase 6: destinations no longer share one placeholder view-note."""
     service = build_service(tmp_path, FakeTransport())
-    app = ForensIQApp(service=service)
+    app = ForensIQApp(service=service, auto_probe=False)
     async with app.run_test(size=SIZE) as pilot:
-        for key, expected in (("3", "placeholder"), ("4", "placeholder"), ("5", "placeholder")):
+        seen = set()
+        for key in ("1", "2", "3", "4", "5", "6"):
             await pilot.press(key)
             await pilot.pause()
-            assert expected in note_text(app)
+            note = note_text(app)
+            assert "placeholder" not in note
+            seen.add(note)
+        assert len(seen) == 6
 
 
 # -- monitoring lifecycle ------------------------------------------------
@@ -204,7 +209,7 @@ async def test_start_runs_a_cycle_and_fills_the_existing_widgets(tmp_path) -> No
         transport,
         batches=[{"auth_logs": [{"message": "Failed password"}, {"message": "Failed password"}]}],
     )
-    app = ForensIQApp(service=service)
+    app = ForensIQApp(service=service, auto_probe=False)
     async with app.run_test(size=SIZE) as pilot:
         await pilot.press("s")
         assert await wait_for(lambda: app.submitted >= 1)
@@ -238,7 +243,7 @@ async def test_force_cycle_submits_an_extra_batch(tmp_path) -> None:
             {"auth_logs": [{"message": "b"}]},
         ],
     )
-    app = ForensIQApp(service=service)
+    app = ForensIQApp(service=service, auto_probe=False)
     async with app.run_test(size=SIZE) as pilot:
         await pilot.press("s")
         assert await wait_for(lambda: app.submitted >= 1)
@@ -251,7 +256,7 @@ async def test_force_cycle_submits_an_extra_batch(tmp_path) -> None:
 
 async def test_force_cycle_before_start_only_reports(tmp_path) -> None:
     service = build_service(tmp_path, FakeTransport())
-    app = ForensIQApp(service=service)
+    app = ForensIQApp(service=service, auto_probe=False)
     async with app.run_test(size=SIZE) as pilot:
         await pilot.press("t")
         await pilot.pause()
@@ -264,7 +269,7 @@ async def test_backend_failure_is_reported_and_loop_survives(tmp_path) -> None:
         (500, {"detail": "analysis exploded"}),
     )
     service = build_service(tmp_path, transport, batches=[{"auth_logs": [{"message": "x"}]}])
-    app = ForensIQApp(service=service)
+    app = ForensIQApp(service=service, auto_probe=False)
     async with app.run_test(size=SIZE) as pilot:
         await pilot.press("s")
         assert await wait_for(lambda: "backend error" in stream_text(app))
@@ -280,7 +285,7 @@ async def test_backend_failure_is_reported_and_loop_survives(tmp_path) -> None:
 async def test_start_button_and_monitoring_guard_are_consistent(tmp_path) -> None:
     transport = FakeTransport().queue({"session_id": "s-1"})
     service = build_service(tmp_path, transport)
-    app = ForensIQApp(service=service)
+    app = ForensIQApp(service=service, auto_probe=False)
     async with app.run_test(size=SIZE) as pilot:
         await pilot.pause()
         assert app.query_one("#btn-start").disabled is False
@@ -302,7 +307,7 @@ async def test_start_button_and_monitoring_guard_are_consistent(tmp_path) -> Non
 async def test_quit_stops_monitoring_and_closes_the_transport(tmp_path) -> None:
     transport = FakeTransport().queue({"session_id": "s-3"}, {"status": "stopped"})
     service = build_service(tmp_path, transport)
-    app = ForensIQApp(service=service)
+    app = ForensIQApp(service=service, auto_probe=False)
     async with app.run_test(size=SIZE) as pilot:
         await pilot.press("s")
         assert await wait_for(lambda: service.monitoring is not None)
@@ -317,7 +322,7 @@ async def test_quit_stops_monitoring_and_closes_the_transport(tmp_path) -> None:
 async def test_shutdown_without_monitoring_is_clean(tmp_path) -> None:
     transport = FakeTransport()
     service = build_service(tmp_path, transport)
-    app = ForensIQApp(service=service)
+    app = ForensIQApp(service=service, auto_probe=False)
     async with app.run_test(size=SIZE) as pilot:
         await pilot.pause()
         await pilot.press("q")

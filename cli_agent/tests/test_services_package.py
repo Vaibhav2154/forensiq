@@ -39,7 +39,12 @@ def test_old_client_package_is_gone() -> None:
 def test_no_source_file_still_imports_the_old_package() -> None:
     offenders = []
     for path in CLI_DIR.rglob("*.py"):
+        relative = path.relative_to(CLI_DIR)
         if "__pycache__" in path.parts or "tests" in path.parts:
+            continue
+        # Local virtualenvs / runtime data live inside cli_agent and are
+        # ignored by git; they are not project source.
+        if any(part.startswith(".") or part.endswith(".egg-info") for part in relative.parts):
             continue
         text = path.read_text(encoding="utf-8")
         if "cli_agent.client" in text or "from .client" in text:

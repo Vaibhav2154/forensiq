@@ -76,7 +76,12 @@ def build_parser() -> argparse.ArgumentParser:
     analyze.add_argument("--output", help="write the raw analysis JSON here")
     analyze.add_argument("--no-enhance", action="store_true")
 
-    sub.add_parser("tui", help="launch the terminal dashboard")
+    tui = sub.add_parser("tui", help="launch the terminal dashboard")
+    tui.add_argument(
+        "--api-url",
+        default=None,
+        help=f"backend URL for this run (defaults to the saved config, {DEFAULT_API_URL})",
+    )
 
     return parser
 
@@ -88,7 +93,7 @@ def main(argv: Sequence[str] | None = None) -> int:
         parser.print_help()
         return 0
     if args.command == "tui":
-        return _launch_tui()
+        return _launch_tui(args.api_url)
     try:
         return asyncio.run(_dispatch(args))
     except KeyboardInterrupt:
@@ -99,7 +104,7 @@ def main(argv: Sequence[str] | None = None) -> int:
         return 1
 
 
-def _launch_tui() -> int:
+def _launch_tui(api_url: str | None = None) -> int:
     """Run the Textual app; ``textual`` stays an optional dependency."""
     try:
         from .tui.app import ForensIQApp
@@ -110,7 +115,11 @@ def _launch_tui() -> int:
             file=sys.stderr,
         )
         return 1
-    ForensIQApp().run()
+    service = None
+    if api_url:
+        service = CliService()
+        service.configure_monitoring(base_url=api_url.rstrip("/"))
+    ForensIQApp(service=service).run()
     return 0
 
 

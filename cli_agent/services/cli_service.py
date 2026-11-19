@@ -10,6 +10,7 @@ from __future__ import annotations
 from dataclasses import asdict
 from pathlib import Path
 from typing import Any
+from urllib.parse import urlencode
 
 from .api_client import ApiClient, Transport
 from .auth_service import AuthService, Session, TokenStore
@@ -20,11 +21,17 @@ from .collector_service import (
 )
 from .config_service import ClientConfig, ConfigService
 from .errors import ConfigurationError, ForensIQError
+from .limits import MAX_LOG_CHARS
 from .monitoring_service import MonitoringService, MonitoringState
 from .response_adapter import AnalysisView, adapt_analysis
 
 ANALYZE_ENDPOINT = "/api/v1/analyze"
-MAX_LOG_CHARS = 50_000  # mirrors server/model/logs_model.py: logs max_length
+HEALTH_ENDPOINT = "/health"
+SESSIONS_ENDPOINT = "/api/v1/monitoring/sessions"
+KNOWLEDGE_STATS_ENDPOINT = "/api/v1/knowledge/stats"
+KNOWLEDGE_SEARCH_ENDPOINT = "/api/v1/knowledge/search"
+LATEST_ANALYSIS_ENDPOINT = "/api/v1/latest"
+HISTORY_ENDPOINT = "/api/v1/history"
 
 
 class CliService:
@@ -111,6 +118,69 @@ class CliService:
         except OSError as exc:
             raise ConfigurationError(f"cannot read {file_path}: {exc}") from exc
         return await self.analyze_text(content, **kwargs)
+
+    # -- read-only backend views (Phase 6) --------------------------------
+    async def backend_health(self) -> dict[str, Any]:
+        """``GET /health`` - exists in the backend and needs no authentication."""
+        payload = await self.api.request("GET", HEALTH_ENDPOINT, authenticated=False)
+        return payload if isinstance(payload, dict) else {}
+
+    async def list_sessions(self, *, active_only: bool = False) -> list[dict[str, Any]]:
+        """``GET /api/v1/monitoring/sessions`` for the authenticated user.
+
+        The backend supports full history via ``active_only=false``; both
+        active and stopped rows are returned by the same route.
+        """
+        self.auth.require_session()
+        query = urlencode({"active_only": "true" if active_only else "false"})
+        payload = await self.api.request("GET", f"{SESSIONS_ENDPOINT}?{query}")
+        return [row for row in payload if isinstance(row, dict)] if isinstance(payload, list) else []
+
+    async def get_session(self, session_id: str) -> dict[str, Any]:
+        self.auth.require_session()
+        payload = await self.api.request("GET", f"{SESSIONS_ENDPOINT}/{session_id}")
+        return payload if isinstance(payload, dict) else {}
+
+    async def knowledge_stats(self) -> dict[str, Any]:
+        """``GET /api/v1/knowledge/stats`` - the only knowledge read the CLI needs."""
+        payload = await self.api.request("GET", KNOWLEDGE_STATS_ENDPOINT)
+        return payload if isinstance(payload, dict) else {}
+
+    async def search_knowledge(self, query: str, *, top_k: int = 10) -> dict[str, Any]:
+        """``GET /api/v1/knowledge/search`` with server-side result limits."""
+        if not query or not query.strip():
+            return {"query": query, "total_hits": 0, "hits": []}
+        query_string = urlencode({"q": query.strip(), "top_k": max(1, min(50, int(top_k)))})
+        payload = await self.api.request(
+            "GET", f"{KNOWLEDGE_SEARCH_ENDPOINT}?{query_string}"
+        )
+        return payload if isinstance(payload, dict) else {}
+
+    async def latest_analysis(self) -> dict[str, Any] | None:
+        """``GET /api/v1/latest`` - most recent stored analysis, if any."""
+        self.auth.require_session()
+        payload = await self.api.request("GET", LATEST_ANALYSIS_ENDPOINT)
+        if isinstance(payload, dict):
+            analysis = payload.get("analysis")
+            return analysis if isinstance(analysis, dict) else None
+        return None
+
+    async def analysis_history(self, *, limit: int = 10) -> list[dict[str, Any]]:
+        self.auth.require_session()
+        query = urlencode({"limit": max(1, min(50, int(limit)))})
+        payload = await self.api.request("GET", f"{HISTORY_ENDPOINT}?{query}")
+        return [row for row in payload if isinstance(row, dict)] if isinstance(payload, list) else []
+
+    # -- collector -------------------------------------------------------
+    def collector_summary(self) -> dict[str, Any]:
+        """Platform summary plus configured sources, without raising at the UI."""
+        summary: dict[str, Any] = {"sources": [], "system": {}, "error": None}
+        try:
+            summary["sources"] = self.collector.available_sources()
+        except ForensIQError as exc:
+            summary["error"] = str(exc)
+        summary["system"] = self.collector.system_summary()
+        return summary
 
     # -- monitoring ------------------------------------------------------
     def configure_monitoring(self, **changes: Any) -> ClientConfig:

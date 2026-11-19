@@ -37,6 +37,7 @@ from .auth_service import AuthService
 from .collector_service import CollectorService
 from .config_service import ClientConfig
 from .errors import AuthError
+from .limits import fit_logs_to_backend
 from .response_adapter import AnalysisView, adapt_analysis, next_interval
 
 ANALYZE_ENDPOINT = "/api/v1/analyze"
@@ -63,6 +64,13 @@ class MonitoringStats:
     session_id: str | None = None
     started_at: datetime | None = None
     last_cycle_at: datetime | None = None
+    # Phase 6: the dashboard/monitoring pages report real submission timing and
+    # volume instead of guessing from the cycle counter.
+    last_success_at: datetime | None = None
+    last_cycle_entries: int = 0
+    submitted_entries: int = 0
+    truncated_cycles: int = 0
+    last_truncated_chars: int = 0
 
 
 @dataclass(frozen=True)
@@ -79,6 +87,7 @@ class CycleOutcome:
 StateCallback = Callable[[MonitoringState], None]
 ResultCallback = Callable[[AnalysisView, CycleOutcome], None]
 ErrorCallback = Callable[[Exception, CycleOutcome | None], None]
+CycleCallback = Callable[[CycleOutcome], None]
 
 
 class MonitoringService:
@@ -94,6 +103,7 @@ class MonitoringService:
         on_result: ResultCallback | None = None,
         on_error: ErrorCallback | None = None,
         on_state_change: StateCallback | None = None,
+        on_cycle: CycleCallback | None = None,
         sleep: Callable[[float], Awaitable[None]] | None = None,
         now: Callable[[], datetime] | None = None,
     ) -> None:
@@ -104,6 +114,7 @@ class MonitoringService:
         self._on_result = on_result
         self._on_error = on_error
         self._on_state_change = on_state_change
+        self._on_cycle = on_cycle
         self._sleep = sleep or self._interruptible_sleep
         self._now = now or (lambda: datetime.now(timezone.utc))
 
@@ -129,6 +140,11 @@ class MonitoringService:
     @property
     def interval_seconds(self) -> int:
         return self._interval
+
+    @property
+    def sources(self) -> tuple[str, ...]:
+        """The validated source ids this loop is collecting from."""
+        return self._sources
 
     @property
     def is_running(self) -> bool:
@@ -229,19 +245,31 @@ class MonitoringService:
 
         self._stats.cycles += 1
         self._stats.last_cycle_at = self._now()
+        self._stats.last_cycle_entries = result.total_entries
 
         if result.is_empty:
             self._stats.empty_cycles += 1
-            return CycleOutcome(cycle=cycle, collected_entries=0, submitted=False)
+            return self._emit_cycle(
+                CycleOutcome(cycle=cycle, collected_entries=0, submitted=False)
+            )
 
         if not result.formatted_text.strip():
             self._stats.empty_cycles += 1
-            return CycleOutcome(
-                cycle=cycle, collected_entries=result.total_entries, submitted=False
+            return self._emit_cycle(
+                CycleOutcome(
+                    cycle=cycle, collected_entries=result.total_entries, submitted=False
+                )
             )
 
+        # The backend rejects ``logs`` longer than 50,000 characters with a
+        # 422. Real collection batches routinely exceed that, so keep the most
+        # recent tail and say so inside the payload.
+        logs, dropped = fit_logs_to_backend(result.formatted_text)
+        if dropped:
+            self._stats.truncated_cycles += 1
+            self._stats.last_truncated_chars = dropped
         payload = {
-            "logs": result.formatted_text,
+            "logs": logs,
             "enhance_with_ai": bool(self._config.enhance_with_ai),
             "max_results": int(self._config.max_results),
         }
@@ -267,6 +295,8 @@ class MonitoringService:
             )
 
         self._stats.submitted += 1
+        self._stats.submitted_entries += result.total_entries
+        self._stats.last_success_at = self._now()
         self._stats.last_summary = view.summary or None
         self._stats.last_technique_count = view.technique_count
         outcome = CycleOutcome(
@@ -277,6 +307,12 @@ class MonitoringService:
         )
         if self._on_result is not None:
             self._on_result(view, outcome)
+        return self._emit_cycle(outcome)
+
+    def _emit_cycle(self, outcome: CycleOutcome) -> CycleOutcome:
+        """Report every cycle (including empty ones) to the UI, if listening."""
+        if self._on_cycle is not None:
+            self._on_cycle(outcome)
         return outcome
 
     async def _abort(self, message: str) -> None:

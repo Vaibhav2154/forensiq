@@ -1,10 +1,19 @@
-"""Visual regression: the functional TUI must keep the approved preview layout.
+"""Visual regression: the functional TUI must keep the approved preview shell.
 
-The check compares the mounted widget tree of :class:`ForensIQApp` with the
-tree of the frozen :class:`ForensIQPreview` (same ids, same classes, same
-containment, same order) and verifies that the only stylesheet change is the
-palette. Any accidental redesign - a moved panel, a new column layout, a
-dropped card - fails here.
+Phase 6 adds real content inside the existing regions, so the Phase 5 rule
+("the whole widget tree is byte-identical") no longer holds.  The invariant
+that does hold, and that this module enforces, is:
+
+* every container of the approved preview (by id, type and parent) still
+  exists, in the same place - no panel moved, no card dropped, no navigation
+  restructured;
+* the four cards, six navigation items and the preview's shortcuts are
+  preserved (shortcuts only extended by ``l``/``o``);
+* the palette is centralised and complete;
+* the layout still mounts at 120x40 and 80x24.
+
+Additional content widgets inside a preserved region are allowed and listed in
+``PHASE_6_REPORT.md``.
 """
 
 from __future__ import annotations
@@ -17,17 +26,17 @@ from pathlib import Path
 
 from textual.widgets import ListItem
 
+from cli_agent.services.auth_service import TokenStore
 from cli_agent.services.cli_service import CliService
 from cli_agent.services.collector_service import CollectorService
 from cli_agent.services.config_service import ConfigService
-from cli_agent.services.auth_service import TokenStore
 from cli_agent.tui.app import ForensIQApp
 
 from .conftest import FakeExtractor, FakeTransport
 
 REPO_ROOT = Path(__file__).resolve().parents[2]
 TUI_DIR = Path(__file__).resolve().parents[1] / "tui"
-MARKER = "__FINGERPRINT__"
+MARKER = "__SHELL__"
 
 # The preview is measured in its own interpreter: two Textual apps cannot be
 # driven back-to-back in one event loop (the second never reports ready).
@@ -38,25 +47,30 @@ from textual.widgets import ListItem, ListView
 from cli_agent.tui.preview import ForensIQPreview
 
 
-def structure(widget):
-    node = [type(widget).__name__, widget.id, sorted(widget.classes)]
+def shell(widget, parent=None):
+    rows = []
     if isinstance(widget, (Horizontal, Vertical)):
-        node.append([structure(child) for child in widget.children])
+        if widget.id:
+            rows.append([type(widget).__name__, widget.id, parent])
+        child_parent = widget.id or parent
+        for child in widget.children:
+            rows.extend(shell(child, child_parent))
     elif isinstance(widget, ListView):
-        node.append([child.id for child in widget.children if isinstance(child, ListItem)])
-    return node
+        rows.append(["ListView", widget.id or "list", parent])
+    return rows
 
 
 async def main():
     app = ForensIQPreview()
     async with app.run_test(size=(120, 40)) as pilot:
         await pilot.pause()
-        print("{MARKER}" + json.dumps(structure(app.screen)))
+        print("{MARKER}" + json.dumps(shell(app.screen)))
 
 
 import asyncio
 asyncio.run(main())
 """
+
 REQUIRED_PALETTE = {
     "#080C0A",  # main background
     "#101713",  # panel background
@@ -73,21 +87,21 @@ REQUIRED_PALETTE = {
 PREVIEW_ONLY_COLOURS = ("#0b1020", "#131a2e", "#7fe3c0", "#101830", "#1d2a47")
 
 
-def structure(widget) -> list:
-    """Structural fingerprint: type, id, classes and declared children only.
-
-    Leaf widgets are compared without descending, because their internal
-    children (scrollbars, rendered rows) depend on data, not layout.
-    """
+def shell(widget, parent=None) -> list:
+    """Shell fingerprint: containers by id/type/parent, plus the nav list."""
     from textual.containers import Horizontal, Vertical
-    from textual.widgets import ListItem, ListView
+    from textual.widgets import ListView
 
-    node: list = [type(widget).__name__, widget.id, sorted(widget.classes)]
+    rows: list = []
     if isinstance(widget, (Horizontal, Vertical)):
-        node.append([structure(child) for child in widget.children])
+        if widget.id:
+            rows.append([type(widget).__name__, widget.id, parent])
+        child_parent = widget.id or parent
+        for child in widget.children:
+            rows.extend(shell(child, child_parent))
     elif isinstance(widget, ListView):
-        node.append([child.id for child in widget.children if isinstance(child, ListItem)])
-    return node
+        rows.append(["ListView", widget.id or "list", parent])
+    return rows
 
 
 def build_app(tmp_path) -> ForensIQApp:
@@ -97,10 +111,10 @@ def build_app(tmp_path) -> ForensIQApp:
         transport=FakeTransport(),
         collector=CollectorService(extractor=FakeExtractor()),
     )
-    return ForensIQApp(service=service, restore_session=False)
+    return ForensIQApp(service=service, restore_session=False, auto_probe=False)
 
 
-def preview_fingerprint() -> list:
+def preview_shell() -> list:
     result = subprocess.run(
         [sys.executable, "-c", PREVIEW_SCRIPT],
         cwd=REPO_ROOT,
@@ -111,16 +125,34 @@ def preview_fingerprint() -> list:
     assert result.returncode == 0, result.stderr
     lines = [line for line in result.stdout.splitlines() if line.startswith(MARKER)]
     assert lines, result.stdout
-    return json.loads(lines[-1][len(MARKER):])
+    return json.loads(lines[-1][len(MARKER) :])
 
 
-async def test_widget_tree_is_identical_to_the_preview(tmp_path) -> None:
-    preview = preview_fingerprint()
+async def test_preview_shell_is_preserved(tmp_path) -> None:
+    expected = preview_shell()
     app = build_app(tmp_path)
     async with app.run_test(size=(120, 40)) as pilot:
         await pilot.pause()
-        current = structure(app.screen)
-    assert current == preview
+        current = shell(app.screen)
+
+    # Every preview container still exists with the same parent.
+    app_map = {(row[1], row[0]): row[2] for row in current}
+    for _kind, widget_id, parent in expected:
+        key = (widget_id, dict((row[1], row[0]) for row in expected).get(widget_id))
+        assert key in app_map, f"preview region {widget_id} is missing or changed type"
+        assert app_map[key] == parent, f"region {widget_id} moved out of {parent}"
+
+
+async def test_layout_survives_120x40_and_80x24(tmp_path) -> None:
+    for size in ((120, 40), (80, 24)):
+        app = build_app(tmp_path)
+        async with app.run_test(size=size) as pilot:
+            await pilot.pause()
+            for selector in ("#body", "#sidebar", "#main", "#panels", "#monitor-panel", "#technique-panel"):
+                widget = app.query_one(selector)
+                assert widget.size.width > 0 and widget.size.height > 0, f"{selector} collapsed at {size}"
+            # Content must remain reachable through scrolling, not clipped away.
+            assert app.query_one("#page-detail").size.height >= 1
 
 
 async def test_layout_ids_survive(tmp_path) -> None:
@@ -131,6 +163,7 @@ async def test_layout_ids_survive(tmp_path) -> None:
             "#body",
             "#sidebar",
             "#main",
+            "#cards",
             "#panels",
             "#monitor-panel",
             "#technique-panel",
@@ -141,9 +174,19 @@ async def test_layout_ids_survive(tmp_path) -> None:
             "#btn-tick",
             "#techniques",
             "#stream",
+            "#card-auth",
+            "#card-backend",
             "#card-mon",
             "#card-batches",
             "#view-note",
+            # Phase 6 additions, inside the regions above.
+            "#page-detail",
+            "#page-detail-text",
+            "#settings-form",
+            "#knowledge-form",
+            "#detail-view",
+            "#monitor-heading",
+            "#technique-heading",
         ):
             assert app.query(selector), f"missing {selector}"
         assert len(app.query(".card")) == 4

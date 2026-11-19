@@ -1,34 +1,55 @@
-"""ForensIQ Textual application (Phase 4 + 5).
+"""ForensIQ Textual application - Phase 6 functional pages.
 
-The compose tree is the approved preview layout, unchanged: header, sidebar,
-four status cards, the monitoring panel with its three controls, the matched
-techniques table and the live event stream. Only colours (``styles.tcss``) and
-behaviour (real services) differ.
+The approved preview shell is preserved: header, sidebar navigation, the four
+status cards, the monitoring panel with its three controls, the matched
+techniques panel and the live event stream.  Phase 6 fills each navigation
+destination with real data from :class:`~cli_agent.services.cli_service.CliService`
+instead of repeating one placeholder:
 
-Deliberate exceptions to "do not change the layout", all required for
-functionality and recorded in ``COMBINED_PHASE_4_5_REPORT.md``:
+===========================  =============================================
+destination                  real content
+===========================  =============================================
+Dashboard                    auth, ``/health`` probe, monitoring counters,
+                             collector sources, last success/error
+Monitoring                   controls, interval, sources, submission path,
+                             bounded recent-cycle table
+Analysis                     ``GET /api/v1/latest`` (or the last live cycle):
+                             summary, techniques, enhanced report,
+                             investigation and processing time
+Knowledge                    ``GET /api/v1/knowledge/stats`` and
+                             ``GET /api/v1/knowledge/search``
+Sessions                     ``GET /api/v1/monitoring/sessions`` history
+Settings                     validated, persisted client configuration and
+                             the authenticated account
+===========================  =============================================
 
-1. a modal sign-in screen (Textual ``ModalScreen``) because the backend issues
-   JWTs through ``POST /login`` and the dashboard has no credential widgets;
-2. ``l`` (sign in) and ``o`` (sign out) key bindings, added alongside the
-   existing shortcuts, which are otherwise untouched.
+Deliberate layout additions (all inside the existing regions, recorded in
+``PHASE_6_REPORT.md``):
 
-Analysis, knowledge and sessions remain placeholders: selecting them only
-updates the existing view-note label.
+1. a sign-in modal (Phase 4 + 5) because the dashboard has no credential
+   widgets;
+2. ``l``/``o`` shortcuts next to the untouched preview bindings;
+3. page-specific content mounted inside the existing ``#monitor-panel`` and
+   ``#technique-panel`` regions (``#page-detail``, ``#settings-form``,
+   ``#knowledge-form``, ``#detail-view``).  Panel positions, sizes, borders,
+   navigation and shortcuts are unchanged.
 """
 
 from __future__ import annotations
 
 import asyncio
-from datetime import datetime
+import platform as platform_module
+import time
+from datetime import datetime, timezone
 from urllib.parse import urlsplit
 
 from rich.markup import escape
 from textual.app import App, ComposeResult
-from textual.containers import Horizontal, Vertical
+from textual.containers import Horizontal, Vertical, VerticalScroll
 from textual.screen import ModalScreen
 from textual.widgets import (
     Button,
+    Checkbox,
     DataTable,
     Footer,
     Header,
@@ -41,9 +62,11 @@ from textual.widgets import (
 )
 
 from ..services.cli_service import CliService
-from ..services.errors import ForensIQError
+from ..services.config_service import ClientConfig
+from ..services.errors import ConfigurationError, ForensIQError
 from ..services.monitoring_service import CycleOutcome, MonitoringState
-from ..services.response_adapter import AnalysisView
+from ..services.response_adapter import AnalysisView, adapt_analysis
+from .state import AppState, BackendStatus, CycleRecord
 
 NAV_ITEMS = [
     ("dashboard", "Dashboard", "Operational overview"),
@@ -55,19 +78,32 @@ NAV_ITEMS = [
 ]
 
 VIEW_DESCRIPTIONS = {
-    "analysis": "placeholder - reporting arrives in a later phase",
-    "knowledge": "placeholder - ATT&CK / CVE browsing arrives in a later phase",
-    "sessions": "placeholder - backend session history arrives in a later phase",
+    "dashboard": "live status from the service layer",
+    "monitoring": "automatic Windows/Linux log collection",
+    "analysis": "latest stored analysis",
+    "knowledge": "backend knowledge store",
+    "sessions": "backend session history",
+    "settings": "configuration and account",
 }
 
-# Colour roles, mirrored in styles.tcss. Kept here because RichLog markup
-# cannot use the Textual CSS variables.
+# Panel headings per destination: (monitor panel, technique panel).
+PANEL_HEADINGS = {
+    "dashboard": ("MONITORING SESSION", "MATCHED TECHNIQUES"),
+    "monitoring": ("COLLECTION STATUS", "RECENT CYCLES"),
+    "analysis": ("ANALYSIS", "MATCHED TECHNIQUES"),
+    "knowledge": ("KNOWLEDGE STORE", "SEARCH RESULTS"),
+    "sessions": ("CURRENT SESSION", "SESSION HISTORY"),
+    "settings": ("CONFIGURATION", "ACCOUNT"),
+}
+
+# Colour roles, mirrored in styles.tcss (RichLog markup cannot use CSS vars).
 OK = "#39FF88"
 WARN = "#E5B94B"
 BAD = "#F06464"
 INFO = "#5CC8D7"
 MUTED = "#91A598"
 TECHNIQUE_ROWS = 25
+ROW_LIMIT = 50
 
 
 class LoginScreen(ModalScreen[bool]):
@@ -133,7 +169,7 @@ class LoginScreen(ModalScreen[bool]):
 
 
 class ForensIQApp(App):
-    """Functional ForensIQ dashboard with the approved preview layout."""
+    """Functional ForensIQ console with the approved preview layout."""
 
     TITLE = "ForensIQ"
     SUB_TITLE = "security operations console"
@@ -159,19 +195,33 @@ class ForensIQApp(App):
         service: CliService | None = None,
         *,
         restore_session: bool = True,
+        auto_probe: bool = True,
     ) -> None:
         super().__init__()
         self.service = service or CliService()
         self._restore_on_start = restore_session
+        # Tests disable the periodic ``/health`` probe so their fake transport
+        # scripts stay deterministic. Real launches keep it on.
+        self._auto_probe = auto_probe
+        self.state = AppState()
         self.view = "dashboard"
+
+        # Legacy counters kept in sync for backwards compatibility with the
+        # Phase 5 behavioural tests; the state object is authoritative.
         self.events = 0
         self.submitted = 0
         self.techniques_found = 0
         self.cycles = 0
+
         self._latest: AnalysisView | None = None
+        self._table_shape: tuple[str, ...] | None = None
+        self._settings_loaded = False
+        self._settings_dirty = False
+        self._probe_inflight = False
+        self._compact = False
         self._closing = False
 
-    # -- layout (unchanged from the approved preview) ---------------------
+    # -- layout (approved preview shell, content regions filled per page) --
     def compose(self) -> ComposeResult:
         yield Header(show_clock=True)
         with Horizontal(id="body"):
@@ -186,14 +236,14 @@ class ForensIQApp(App):
                 )
             with Vertical(id="main"):
                 yield Label("", id="view-note")
-                with Horizontal():
-                    yield Static("AUTH\nsigned out", classes="card")
-                    yield Static("BACKEND\n-", classes="card")
+                with Horizontal(id="cards"):
+                    yield Static("AUTH\nsigned out", classes="card", id="card-auth")
+                    yield Static("BACKEND\nunknown", classes="card", id="card-backend")
                     yield Static("MONITORING\nstopped", classes="card", id="card-mon")
                     yield Static("BATCHES\n0 submitted", classes="card", id="card-batches")
                 with Horizontal(id="panels"):
                     with Vertical(id="monitor-panel"):
-                        yield Label("MONITORING SESSION", classes="panel-title")
+                        yield Label("MONITORING SESSION", id="monitor-heading", classes="panel-title")
                         yield Static("", id="monitor-detail", classes="kv")
                         with Horizontal(id="controls"):
                             yield Button("Start", id="btn-start", variant="success")
@@ -201,55 +251,294 @@ class ForensIQApp(App):
                             yield Button("Force cycle", id="btn-tick")
                         yield Static(
                             "Client-owned polling. The backend only stores the session row.",
+                            id="controls-note",
                             classes="kv",
                         )
+                        with VerticalScroll(id="page-detail"):
+                            yield Static("", id="page-detail-text", classes="kv")
+                            with Vertical(id="settings-form"):
+                                yield Label("backend url", classes="field-label")
+                                yield Input(placeholder="http://localhost:8000", id="settings-url")
+                                yield Label("interval (seconds)", classes="field-label")
+                                yield Input(placeholder="300", id="settings-interval")
+                                yield Label("max results (1-20)", classes="field-label")
+                                yield Input(placeholder="5", id="settings-max-results")
+                                yield Label("sources (comma separated, empty = all)", classes="field-label")
+                                yield Input(placeholder="auth_logs, syslog", id="settings-sources")
+                                yield Checkbox("AI enhancement", id="settings-enhance")
+                                yield Button("Save configuration", id="btn-save-settings")
+                            with Horizontal(id="knowledge-form"):
+                                yield Input(placeholder="search ATT&CK / CVE", id="knowledge-query")
+                                yield Button("Search", id="btn-knowledge-search")
+                            yield Label("", id="form-error")
                     with Vertical(id="technique-panel"):
-                        yield Label("MATCHED TECHNIQUES", classes="panel-title")
+                        yield Label("MATCHED TECHNIQUES", id="technique-heading", classes="panel-title")
                         yield DataTable(id="techniques")
+                        yield RichLog(id="detail-view", markup=False, wrap=True)
                 with Vertical(id="stream-panel"):
                     yield Label("LIVE EVENT STREAM", classes="panel-title")
                     yield RichLog(id="stream", markup=True, wrap=True, max_lines=200)
         yield Footer()
 
+    # -- startup ----------------------------------------------------------
     def on_mount(self) -> None:
         table = self.query_one("#techniques", DataTable)
         table.add_columns("ID", "Technique", "Score")
+        self._table_shape = ("ID", "Technique", "Score")
         table.cursor_type = "row"
         table.zebra_stripes = True
-        table.add_row("-", "no analysis yet", "-")
+
+        self.state.platform = f"{platform_module.system()} {platform_module.release()}"
+        self.state.interval_seconds = self.service.config.interval_seconds
+        self.state.sources = tuple(self.service.config.sources)
 
         self._write_stream(f"[{MUTED}]forensiq {escape(self.service.config.base_url)}[/{MUTED}]")
         if self._restore_on_start:
             self._restore_session()
         else:
+            self.state.note("not signed in - press l to sign in", "warn")
             self._write_stream(f"[{WARN}]not signed in - press l to sign in[/{WARN}]")
-        self._refresh_panels()
+        self._sync_state()
+        self._render_page()
 
         list_view = self.query_one(ListView)
         list_view.focus()
         list_view.index = 0
 
         self.set_interval(1.0, self._clock_tick)
+        if self._auto_probe:
+            self.run_worker(self._refresh_dashboard(), group="view-load", exclusive=True)
+            self.set_interval(20.0, self._periodic_probe)
 
-    # -- session ----------------------------------------------------------
     def _restore_session(self) -> None:
         try:
             session = self.service.restore_session()
         except ForensIQError as exc:
-            self._write_stream(f"[{BAD}]cannot restore session: {escape(str(exc))}[/{BAD}]")
+            self._notify(f"cannot restore session: {exc}", "bad")
+            self.state.authenticated = False
             return
         if session is None:
-            self._write_stream(f"[{WARN}]not signed in - press l to sign in[/{WARN}]")
+            self.state.authenticated = False
+            self._notify("not signed in - press l to sign in", "warn")
             return
-        self._write_stream(
-            f"[{OK}]session restored[/{OK}] as {escape(session.username or 'unknown')}"
+        self.state.authenticated = True
+        self.state.username = session.username
+        self._notify(f"session restored as {session.username or 'unknown'}", "ok")
+
+    # -- data loading -----------------------------------------------------
+    def _periodic_probe(self) -> None:
+        if not self._probe_inflight:
+            self.run_worker(self._refresh_dashboard(), group="probe")
+
+    async def _refresh_dashboard(self) -> None:
+        await self._probe_backend()
+        if self.service.is_authenticated:
+            await self._load_profile()
+        await self._load_collector_info()
+        self._sync_state()
+        self._render_page()
+
+    async def _probe_backend(self) -> None:
+        if self._probe_inflight:
+            return
+        self._probe_inflight = True
+        started = time.perf_counter()
+        try:
+            health = await asyncio.wait_for(self.service.backend_health(), timeout=10)
+        except asyncio.CancelledError:  # pragma: no cover - shutdown path
+            raise
+        except Exception as exc:  # noqa: BLE001 - offline is a normal state
+            self.state.backend = BackendStatus(
+                state="offline",
+                detail=self._short_error(exc),
+                checked_at=datetime.now(timezone.utc),
+            )
+        else:
+            status = str(health.get("status") or "unknown")
+            services = health.get("services") or {}
+            self.state.backend = BackendStatus(
+                state="degraded" if status == "degraded" else "online",
+                detail=f"health {status}",
+                services={str(k): str(v) for k, v in services.items()} if isinstance(services, dict) else {},
+                latency_ms=(time.perf_counter() - started) * 1000,
+                checked_at=datetime.now(timezone.utc),
+            )
+        finally:
+            self._probe_inflight = False
+        # An expired token is discovered by the next authenticated call; do not
+        # silently mark the user signed in when the service dropped the session.
+        self.state.authenticated = self.service.is_authenticated
+
+    async def _load_profile(self) -> None:
+        try:
+            profile = await self.service.profile()
+        except asyncio.CancelledError:  # pragma: no cover
+            raise
+        except Exception as exc:  # noqa: BLE001 - page must render regardless
+            self.state.profile_error = self._short_error(exc)
+            self.state.authenticated = self.service.is_authenticated
+            return
+        self.state.profile = profile
+        self.state.profile_error = None
+        self.state.authenticated = True
+        self.state.username = str(profile.get("username") or self.state.username or "")
+
+    async def _load_collector_info(self) -> None:
+        try:
+            summary = await asyncio.to_thread(self.service.collector_summary)
+        except asyncio.CancelledError:  # pragma: no cover
+            raise
+        except Exception as exc:  # noqa: BLE001
+            self.state.collector_error = self._short_error(exc)
+            return
+        self.state.collector_catalogue = list(summary.get("sources") or [])
+        self.state.collector_error = summary.get("error")
+
+    async def _load_view(self, key: str) -> None:
+        self.state.loading.add(key)
+        try:
+            if key in ("dashboard", "monitoring", "analysis", "sessions", "settings"):
+                await self._probe_backend()
+            if key in ("dashboard", "monitoring"):
+                await self._load_collector_info()
+            if key == "analysis":
+                await self._load_analysis()
+            elif key == "sessions":
+                await self._load_sessions()
+            elif key == "knowledge":
+                await self._load_knowledge()
+            elif key == "settings" and self.service.is_authenticated:
+                await self._load_profile()
+        finally:
+            self.state.loading.discard(key)
+            self._sync_state()
+            self._render_page()
+
+    async def _load_analysis(self) -> None:
+        if not self.service.is_authenticated:
+            self.state.analysis_status = "empty"
+            self.state.analysis_error = "not authenticated - press l to sign in"
+            return
+        try:
+            payload = await self.service.latest_analysis()
+        except asyncio.CancelledError:  # pragma: no cover
+            raise
+        except Exception as exc:  # noqa: BLE001
+            self.state.analysis_status = "unavailable"
+            self.state.analysis_error = self._short_error(exc)
+            return
+        if payload is None:
+            self.state.analysis_status = "empty"
+            self.state.analysis_error = None
+            return
+        try:
+            view = adapt_analysis(payload)
+        except ForensIQError as exc:
+            self.state.analysis_status = "unavailable"
+            self.state.analysis_error = str(exc)
+            return
+        self._latest = view
+        self.state.latest_analysis = view
+        self.state.analysis_status = "loaded"
+        self.state.analysis_error = None
+        self.techniques_found = view.technique_count
+
+    async def _load_sessions(self) -> None:
+        if not self.service.is_authenticated:
+            self.state.sessions_status = "error"
+            self.state.sessions_error = "not authenticated - press l to sign in"
+            return
+        try:
+            rows = await self.service.list_sessions(active_only=False)
+        except asyncio.CancelledError:  # pragma: no cover
+            raise
+        except Exception as exc:  # noqa: BLE001
+            self.state.sessions_status = "error"
+            self.state.sessions_error = self._short_error(exc)
+            return
+        self.state.sessions = rows
+        self.state.sessions_status = "loaded"
+        self.state.sessions_error = None
+
+    async def _load_knowledge(self) -> None:
+        try:
+            stats = await self.service.knowledge_stats()
+        except asyncio.CancelledError:  # pragma: no cover
+            raise
+        except Exception as exc:  # noqa: BLE001
+            self.state.knowledge_status = "error"
+            self.state.knowledge_error = self._short_error(exc)
+            return
+        self.state.knowledge_stats = stats
+        self.state.knowledge_status = "loaded"
+        self.state.knowledge_error = None
+
+    async def _run_knowledge_search(self) -> None:
+        query = self.query_one("#knowledge-query", Input).value.strip()
+        self.query_one("#form-error", Label).update("")
+        if not query:
+            self.query_one("#form-error", Label).update("enter a search query")
+            return
+        self.state.knowledge_query = query
+        self.state.knowledge_search_status = "searching"
+        self._render_page()
+        try:
+            payload = await self.service.search_knowledge(query, top_k=ROW_LIMIT)
+        except asyncio.CancelledError:  # pragma: no cover
+            raise
+        except Exception as exc:  # noqa: BLE001
+            self.state.knowledge_search_status = "error"
+            self.state.knowledge_search_error = self._short_error(exc)
+            self.state.knowledge_hits = []
+        else:
+            hits = payload.get("hits")
+            self.state.knowledge_hits = [row for row in hits if isinstance(row, dict)] if isinstance(hits, list) else []
+            self.state.knowledge_search_status = "loaded"
+            self.state.knowledge_search_error = None
+            self.state.knowledge_search_notice = payload.get("notice") if isinstance(payload.get("notice"), str) else None
+        self._render_page()
+
+    # -- state helpers ----------------------------------------------------
+    def _sync_state(self) -> None:
+        monitoring = self.service.monitoring
+        if monitoring is not None:
+            self.state.apply_monitoring(monitoring)
+            self.cycles = self.state.cycles
+            self.submitted = self.state.submitted
+            self.events = self.state.collected_entries
+        else:
+            self.state.apply_monitoring(None)
+        self.state.authenticated = self.service.is_authenticated
+        self.state.username = self.state.username or (
+            self.service.auth.session.username if self.service.auth.session else None
+        )
+        self.state.interval_seconds = (
+            monitoring.interval_seconds
+            if monitoring is not None
+            else self.service.config.interval_seconds
+        )
+        self.state.sources = (
+            tuple(monitoring.sources)
+            if monitoring is not None
+            else tuple(self.service.config.sources)
         )
 
-    def _current_username(self) -> str | None:
-        session = self.service.auth.session
-        return session.username if session else None
+    @staticmethod
+    def _short_error(exc: BaseException) -> str:
+        text = str(exc).strip()
+        return text[:120] if text else type(exc).__name__
 
-    # -- rendering --------------------------------------------------------
+    @staticmethod
+    def _fmt_time(value: datetime | str | None) -> str:
+        if value is None:
+            return "No data"
+        if isinstance(value, str):
+            try:
+                value = datetime.fromisoformat(value.replace("Z", "+00:00"))
+            except ValueError:
+                return value[:19]
+        return value.astimezone().strftime("%H:%M:%S")
+
     def _write_stream(self, markup: str) -> None:
         try:
             self.query_one("#stream", RichLog).write(markup)
@@ -257,111 +546,469 @@ class ForensIQApp(App):
             pass
 
     def _notify(self, message: str, colour_role: str = "info") -> None:
-        """Operational feedback in the existing event stream."""
+        """Operational feedback: shared state + the existing event stream."""
+        self.state.note(message, colour_role)
         colour = {"ok": OK, "warn": WARN, "bad": BAD, "info": INFO}.get(colour_role, INFO)
         stamp = datetime.now().strftime("%H:%M:%S")
         self._write_stream(f"[{MUTED}]{stamp}[/{MUTED}] [{colour}]{escape(message)}[/{colour}]")
 
-    def _refresh_panels(self) -> None:
-        monitoring = self.service.monitoring
-        state = monitoring.state if monitoring is not None else MonitoringState.STOPPED
-        state_colour = {
-            MonitoringState.RUNNING: OK,
-            MonitoringState.STARTING: INFO,
-            MonitoringState.STOPPING: WARN,
-            MonitoringState.ERROR: BAD,
-        }.get(state, WARN)
+    # -- rendering --------------------------------------------------------
+    def _render_page(self) -> None:
+        if self._closing:
+            return
+        st = self.state
+        try:
+            self.query_one("#view-note", Label).update(self._view_note())
+            monitor_heading, technique_heading = PANEL_HEADINGS.get(
+                self.view, PANEL_HEADINGS["dashboard"]
+            )
+            self.query_one("#monitor-heading", Label).update(monitor_heading)
+            self.query_one("#technique-heading", Label).update(technique_heading)
+            self._render_cards()
+            self.query_one("#monitor-detail", Static).update(self._monitor_markup())
+            self.query_one("#page-detail-text", Static).update(self._detail_markup())
+            self.query_one("#stream-panel").display = self.view in ("dashboard", "monitoring") and not self._compact
+            self.query_one("#settings-form").display = self.view == "settings"
+            self.query_one("#knowledge-form").display = self.view == "knowledge"
+            self._fill_forms()
+            self._render_table()
+            self._render_detail_view()
+            self._update_buttons()
+        except Exception:  # pragma: no cover - widgets missing only during teardown
+            pass
 
-        username = self._current_username()
-        auth_text = escape(username) if username else "signed out"
-        auth_colour = OK if username else WARN
+    def _render_cards(self) -> None:
+        st = self.state
+        backend = st.backend
+        backend_colour = {"online": OK, "degraded": WARN, "offline": BAD}.get(backend.state, MUTED)
         host = urlsplit(self.service.config.base_url).netloc or self.service.config.base_url
+        latency = f" ({backend.latency_ms:.0f}ms)" if backend.latency_ms is not None else ""
+        auth_text = escape(st.username) if st.username else "signed out"
+        auth_colour = OK if st.authenticated else WARN
+        state_colour = {
+            "running": OK,
+            "starting": INFO,
+            "stopping": WARN,
+            "error": BAD,
+        }.get(st.monitoring_state, WARN)
 
-        cards = self.query(".card")
-        if len(cards) >= 2:
-            cards[0].update(f"[{MUTED}]AUTH[/{MUTED}]\n[{auth_colour}]{auth_text}[/{auth_colour}]")
-            cards[1].update(f"[{MUTED}]BACKEND[/{MUTED}]\n{escape(host)}")
+        self.query_one("#card-auth", Static).update(
+            f"[{MUTED}]AUTH[/{MUTED}]\n[{auth_colour}]{auth_text}[/{auth_colour}]"
+        )
+        self.query_one("#card-backend", Static).update(
+            f"[{MUTED}]BACKEND[/{MUTED}]\n[{backend_colour}]{backend.label}{latency}[/{backend_colour}] {escape(host)}"
+        )
         self.query_one("#card-mon", Static).update(
-            f"[{MUTED}]MONITORING[/{MUTED}]\n[{state_colour}]{state.value}[/{state_colour}]"
+            f"[{MUTED}]MONITORING[/{MUTED}]\n[{state_colour}]{st.monitoring_state}[/{state_colour}]"
         )
         self.query_one("#card-batches", Static).update(
-            f"[{MUTED}]BATCHES[/{MUTED}]\n{self.submitted} submitted"
+            f"[{MUTED}]BATCHES[/{MUTED}]\n{st.submitted} submitted"
         )
 
-        session_id = monitoring.stats.session_id if monitoring is not None else None
-        interval = monitoring.interval_seconds if monitoring is not None else self.service.config.interval_seconds
-        last_error = monitoring.stats.last_error if monitoring is not None else None
+    def _source_label(self) -> str:
+        if self.state.sources:
+            return f"{len(self.state.sources)} selected: " + ", ".join(self.state.sources[:3]) + (
+                "..." if len(self.state.sources) > 3 else ""
+            )
+        catalogue = [str(source.get("id")) for source in self.state.collector_catalogue]
+        if catalogue:
+            return f"all {len(catalogue)}: " + ", ".join(catalogue[:3]) + (
+                "..." if len(catalogue) > 3 else ""
+            )
+        return "Unknown"
 
-        detail = (
-            f"state        [{state_colour}]{state.value}[/{state_colour}]\n"
-            f"session id   {escape(session_id) if session_id else '-'}\n"
-            f"interval     {interval}s\n"
-            f"cycles       {self.cycles}\n"
-            f"events       {self.events}\n"
-            f"techniques   {self.techniques_found}"
-        )
-        if last_error:
-            detail += f"\n[{BAD}]last error   {escape(last_error)[:60]}[/{BAD}]"
-        self.query_one("#monitor-detail", Static).update(detail)
+    def _submission_label(self) -> str:
+        if not self.state.authenticated:
+            return "not authenticated - local only"
+        if self.state.backend.state == "offline":
+            return "backend offline - not submitting"
+        if self.state.backend.state in ("online", "degraded"):
+            return f"submitting to {urlsplit(self.service.config.base_url).netloc or 'backend'}"
+        return "Unknown - backend not probed"
 
-        running = state in (MonitoringState.RUNNING, MonitoringState.STARTING)
-        self.query_one("#btn-start", Button).disabled = running
-        self.query_one("#btn-stop", Button).disabled = state is MonitoringState.STOPPED
+    def _monitor_markup(self) -> str:
+        st = self.state
+        state_colour = {
+            "running": OK,
+            "starting": INFO,
+            "stopping": WARN,
+            "error": BAD,
+        }.get(st.monitoring_state, WARN)
+        lines = [
+            f"state        [{state_colour}]{st.monitoring_state}[/{state_colour}]",
+            f"session id   {escape(st.session_id) if st.session_id else 'No data'}",
+            f"interval     {st.interval_seconds}s",
+        ]
+        if self.view == "dashboard":
+            lines += [
+                f"backend      {st.backend.label}",
+                f"sources      {escape(self._source_label())}",
+                f"cycles       {st.cycles} ({st.submitted} submitted, {st.empty_cycles} empty)",
+                f"failures     {st.failures}",
+                f"last success {self._fmt_time(st.last_success_at)}",
+                f"last error   {escape(st.last_error[:40]) if st.last_error else '-'}",
+            ]
+        elif self.view == "monitoring":
+            lines += [
+                f"submission   {escape(self._submission_label())}",
+                f"sources      {escape(self._source_label())}",
+                f"cycles       {st.cycles}",
+                f"empty        {st.empty_cycles}",
+                f"failures     {st.failures}",
+                f"last cycle   {st.last_cycle_entries} event(s)",
+                f"truncated    {st.truncated_cycles} cycle(s), {st.last_truncated_chars} chars",
+                f"last error   {escape(st.last_error[:40]) if st.last_error else '-'}",
+            ]
+        elif self.view == "analysis":
+            view = st.latest_analysis
+            lines += [
+                f"status       {escape(st.analysis_status)}",
+                f"techniques   {view.technique_count if view else 'No data'}",
+                f"processing   {f'{view.processing_time_ms:.0f}ms' if view and view.processing_time_ms is not None else 'No data'}",
+                f"investigation {'available' if view and view.has_investigation else ('absent' if view else 'No data')}",
+                f"metrics      {len(view.visualization_metrics or {}) if view else 'No data'} key(s)",
+            ]
+        elif self.view == "knowledge":
+            stats = st.knowledge_stats
+            kinds = stats.get("counts_by_kind") or {}
+            kind_text = ", ".join(f"{k} {v}" for k, v in list(kinds.items())[:2]) or "No data"
+            lines += [
+                f"status       {escape(st.knowledge_status)}",
+                f"backend      {escape(str(stats.get('backend') or 'Unknown'))}",
+                f"records      {stats.get('total_records', 'No data')}",
+                f"kinds        {escape(kind_text)}",
+                f"last ingest  {self._fmt_time(stats.get('last_ingested_at'))}",
+            ]
+        elif self.view == "sessions":
+            lines += [
+                f"backend rows {len(st.sessions)}",
+                f"history      {escape(st.sessions_status)}",
+                f"monitoring   {st.monitoring_state}",
+            ]
+        else:  # settings
+            profile = st.profile
+            lines += [
+                f"endpoint     {escape(self.service.config.base_url)}",
+                f"account      {escape(str(profile.get('username') or st.username or 'not authenticated'))}",
+                f"email        {escape(str(profile.get('email') or '-'))}",
+                f"max results  {self.service.config.max_results}",
+                f"ai enhance   {'on' if self.service.config.enhance_with_ai else 'off'}",
+            ]
+        if st.loading:
+            lines.append(f"[{INFO}]loading {escape(', '.join(sorted(st.loading)))}...[/{INFO}]")
+        return "\n".join(lines)
 
-        self.query_one("#view-note", Label).update(self._view_note())
+    def _detail_markup(self) -> str:
+        st = self.state
+        if self.view == "dashboard":
+            services = st.backend.services
+            summary = (
+                ", ".join(f"{k}: {v}" for k, v in list(services.items())[:4])
+                if services
+                else "No data"
+            )
+            lines = [
+                f"[{MUTED}]health[/{MUTED}]       {escape(summary)}",
+                f"[{MUTED}]platform[/{MUTED}]     {escape(st.platform or 'Unknown')}",
+                f"[{MUTED}]collected[/{MUTED}]    {st.collected_entries} event(s)",
+                f"[{MUTED}]submitted[/{MUTED}]    {st.submitted_entries} event(s)",
+            ]
+            if st.collector_error:
+                lines.append(f"[{BAD}]collector: {escape(st.collector_error[:60])}[/{BAD}]")
+            return "\n".join(lines)
+        if self.view == "monitoring":
+            recent = list(st.events)[-3:]
+            lines = [f"[{MUTED}]next cycle in {st.interval_seconds}s while running[/{MUTED}]"]
+            for event in recent:
+                lines.append(
+                    f"[{MUTED}]{event.at.strftime('%H:%M:%S')}[/{MUTED}] {escape(event.message[:52])}"
+                )
+            return "\n".join(lines)
+        if self.view == "analysis":
+            if st.analysis_error:
+                return f"[{BAD}]{escape(st.analysis_error)}[/{BAD}]"
+            if st.latest_analysis is None:
+                return (
+                    "No analysis available.\n\n"
+                    "Start monitoring (s) to submit a batch, or place a stored\n"
+                    "analysis on the backend. Nothing is fabricated here."
+                )
+            stamp = st.latest_analysis.raw.get("analysis_timestamp") if st.latest_analysis.raw else None
+            captured = self._fmt_time(stamp if isinstance(stamp, str) else None)
+            return f"[{MUTED}]source[/{MUTED}] backend /api/v1/latest\n[{MUTED}]captured[/{MUTED}] {escape(captured)}"
+        if self.view == "knowledge":
+            if st.knowledge_error:
+                return f"[{BAD}]{escape(st.knowledge_error)}[/{BAD}]"
+            return (
+                "Search the backend knowledge store. The CLI never invents\n"
+                "records: an empty store returns zero hits."
+            )
+        if self.view == "sessions":
+            if st.sessions_error:
+                return f"[{BAD}]{escape(st.sessions_error)}[/{BAD}]"
+            return (
+                "Session rows are owned by the backend. Started/stopped times\n"
+                "come from the API response; no local history is kept."
+            )
+        return "Edit the fields below and save. Values are validated before\nany file is written; the token store is never touched."
 
     def _view_note(self) -> str:
-        if self.view == "settings":
-            config = self.service.config
-            sources = ", ".join(config.sources) or "all available"
-            return (
-                "[b]Settings[/b]  "
-                f"[dim]interval {config.interval_seconds}s - max results {config.max_results} - "
-                f"ai {'on' if config.enhance_with_ai else 'off'} - sources: {escape(sources)}[/dim]"
+        st = self.state
+        base = VIEW_DESCRIPTIONS.get(self.view, "")
+        detail = ""
+        if self.view == "dashboard":
+            detail = f"backend {st.backend.label} - monitoring {st.monitoring_state}"
+        elif self.view == "monitoring":
+            detail = self._submission_label()
+        elif self.view == "analysis":
+            detail = f"{st.analysis_status}"
+        elif self.view == "knowledge":
+            total = st.knowledge_stats.get("total_records")
+            detail = f"{total} record(s)" if total is not None else st.knowledge_status
+        elif self.view == "sessions":
+            detail = f"{len(st.sessions)} row(s)"
+        elif self.view == "settings":
+            sources = ", ".join(self.service.config.sources) or "all available"
+            detail = (
+                f"interval {self.service.config.interval_seconds}s - "
+                f"max results {self.service.config.max_results} - "
+                f"ai {'on' if self.service.config.enhance_with_ai else 'off'} - "
+                f"sources: {sources}"
             )
-        description = VIEW_DESCRIPTIONS.get(self.view)
-        if description is None:
-            description = next(
-                (desc for key, _label, desc in NAV_ITEMS if key == self.view), ""
-            )
-        return f"[b]{self.view.capitalize()}[/b]  [dim]{escape(description)}[/dim]"
+        return (
+            f"[b]{self.view.capitalize()}[/b]  [dim]{escape(base)}"
+            + (f" - {escape(detail)}" if detail else "")
+            + "[/dim]"
+        )
 
-    def _fill_techniques(self, view: AnalysisView) -> None:
-        table = self.query_one("#techniques", DataTable)
-        table.clear(columns=False)
-        if not view.techniques:
-            table.add_row("-", "no techniques in the latest batch", "-")
+    # -- tables -----------------------------------------------------------
+    def _set_columns(self, table: DataTable, columns: tuple[str, ...]) -> None:
+        if self._table_shape == columns:
             return
-        for technique in view.techniques[:TECHNIQUE_ROWS]:
-            score = (
-                f"{technique.relevance_score:.2f}"
-                if isinstance(technique.relevance_score, float)
-                else "-"
-            )
-            table.add_row(
-                escape(technique.technique_id or "-"),
-                escape(technique.name or "-"),
-                score,
-            )
+        table.clear(columns=True)
+        table.add_columns(*columns)
+        self._table_shape = columns
 
-    # -- monitoring callbacks (run from the service's loop task) ----------
+    def _render_table(self) -> None:
+        table = self.query_one("#techniques", DataTable)
+        if self.view in ("dashboard", "analysis"):
+            self._set_columns(table, ("ID", "Technique", "Score"))
+            table.clear(columns=False)
+            view = self.state.latest_analysis
+            if view is None or not view.techniques:
+                table.add_row("-", "no techniques in the latest batch", "-")
+            else:
+                for technique in view.techniques[:TECHNIQUE_ROWS]:
+                    score = (
+                        f"{technique.relevance_score:.2f}"
+                        if isinstance(technique.relevance_score, float)
+                        else "-"
+                    )
+                    table.add_row(
+                        escape(technique.technique_id or "-"),
+                        escape(technique.name or "-"),
+                        score,
+                    )
+        elif self.view == "monitoring":
+            self._set_columns(table, ("Cycle", "Events", "Result", "Time"))
+            table.clear(columns=False)
+            if not self.state.cycle_log:
+                table.add_row("-", "-", "no cycles yet", "-")
+            else:
+                for record in list(self.state.cycle_log)[-ROW_LIMIT:][::-1]:
+                    result = "submitted" if record.submitted else (record.error or "empty")
+                    table.add_row(
+                        str(record.cycle),
+                        str(record.entries),
+                        escape(result[:28]),
+                        record.at.strftime("%H:%M:%S"),
+                    )
+        elif self.view == "knowledge":
+            self._set_columns(table, ("ID", "Name", "Score"))
+            table.clear(columns=False)
+            if self.state.knowledge_search_status == "error":
+                table.add_row(
+                    "-",
+                    escape((self.state.knowledge_search_error or "search failed")[:40]),
+                    "-",
+                )
+            elif not self.state.knowledge_hits:
+                table.add_row("-", "no knowledge records returned", "-")
+            else:
+                for hit in self.state.knowledge_hits[:ROW_LIMIT]:
+                    record = hit.get("record") if isinstance(hit.get("record"), dict) else {}
+                    content = record.get("content") if isinstance(record.get("content"), dict) else {}
+                    name = content.get("name") or content.get("title") or record.get("source_id")
+                    score = hit.get("score")
+                    table.add_row(
+                        escape(str(record.get("source_id") or "-")[:20]),
+                        escape(str(name or "-")[:40]),
+                        f"{float(score):.2f}" if isinstance(score, (int, float)) else "-",
+                    )
+        elif self.view == "sessions":
+            self._set_columns(table, ("Session", "Status", "Started", "Stopped"))
+            table.clear(columns=False)
+            if self.state.sessions_status == "error":
+                table.add_row("-", escape((self.state.sessions_error or "error")[:30]), "-", "-")
+            elif not self.state.sessions:
+                table.add_row("-", "no sessions returned", "-", "-")
+            else:
+                for row in self.state.sessions[:ROW_LIMIT]:
+                    table.add_row(
+                        escape(str(row.get("session_id") or "-")[:12]),
+                        escape(str(row.get("status") or "-")),
+                        self._fmt_time(row.get("created_at")),
+                        self._fmt_time(row.get("stopped_at")) if row.get("stopped_at") else "-",
+                    )
+        else:  # settings
+            self._set_columns(table, ("Setting", "Value"))
+            table.clear(columns=False)
+            config = self.service.config
+            for key, value in (
+                ("backend url", config.base_url),
+                ("interval", f"{config.interval_seconds}s"),
+                ("max results", str(config.max_results)),
+                ("ai enhancement", "on" if config.enhance_with_ai else "off"),
+                ("monitoring type", config.monitoring_type),
+                ("sources", ", ".join(config.sources) or "all available"),
+                ("account", self.state.username or "not authenticated"),
+            ):
+                table.add_row(escape(key), escape(str(value)))
+
+    def _render_detail_view(self) -> None:
+        detail = self.query_one("#detail-view", RichLog)
+        table = self.query_one("#techniques", DataTable)
+        text = self._long_text()
+        if text is None:
+            detail.display = False
+            table.styles.height = "1fr"
+            return
+        detail.display = True
+        table.styles.height = 12
+        detail.clear()
+        detail.write(text)
+
+    def _long_text(self) -> str | None:
+        st = self.state
+        if self.view == "analysis":
+            if st.analysis_error:
+                return f"ANALYSIS UNAVAILABLE\n\n{st.analysis_error}\n"
+            view = st.latest_analysis
+            if view is None:
+                return None
+            blocks = ["SUMMARY", view.summary or "(backend returned no summary)", ""]
+            if view.enhanced_analysis:
+                blocks += ["ENHANCED ANALYSIS", view.enhanced_analysis, ""]
+            else:
+                blocks += [
+                    "ENHANCED ANALYSIS",
+                    "Not provided. The backend only fills this when AI enhancement "
+                    "is enabled and a Gemini credential is configured.",
+                    "",
+                ]
+            investigation = view.investigation
+            if isinstance(investigation, dict) and investigation:
+                blocks.append("INVESTIGATION")
+                for key in ("executive_summary", "rendered_summary", "summary"):
+                    value = investigation.get(key)
+                    if isinstance(value, str) and value.strip():
+                        blocks.append(value.strip())
+                        break
+                findings = investigation.get("findings")
+                if isinstance(findings, list):
+                    blocks.append(f"{len(findings)} finding(s) recorded.")
+                blocks.append("")
+            if view.visualization_metrics:
+                blocks.append(
+                    "VISUALIZATION METRICS\n"
+                    + ", ".join(sorted(view.visualization_metrics.keys()))
+                )
+            return "\n".join(blocks)
+        if self.view == "knowledge":
+            stats = st.knowledge_stats
+            if st.knowledge_error:
+                return f"KNOWLEDGE STORE UNAVAILABLE\n\n{st.knowledge_error}\n"
+            lines = [
+                "BACKEND KNOWLEDGE STORE",
+                "",
+                f"backend          {stats.get('backend', 'Unknown')}",
+                f"total records    {stats.get('total_records', 'No data')}",
+                f"ingestion runs   {stats.get('total_ingestion_runs', 'No data')}",
+                f"last ingested    {stats.get('last_ingested_at') or 'No data'}",
+                "",
+                "WHAT IS AVAILABLE",
+                "The backend exposes /api/v1/knowledge/{stats,search,ingest/*}.",
+                "Search results are retrieved ATT&CK/CVE context only - never",
+                "proof of compromise. Ingestion from the CLI is not implemented",
+                "and is not faked here.",
+            ]
+            notice = getattr(st, "knowledge_search_notice", None)
+            if notice:
+                lines += ["", str(notice)]
+            return "\n".join(lines)
+        if self.view == "monitoring" and st.last_error:
+            return f"LAST ERROR\n\n{st.last_error}\n"
+        return None
+
+    def _fill_forms(self) -> None:
+        config = self.service.config
+        form = self.query_one("#settings-form")
+        if self.view == "settings" and not self._settings_dirty and not self._settings_loaded:
+            self.query_one("#settings-url", Input).value = config.base_url
+            self.query_one("#settings-interval", Input).value = str(config.interval_seconds)
+            self.query_one("#settings-max-results", Input).value = str(config.max_results)
+            self.query_one("#settings-sources", Input).value = ", ".join(config.sources)
+            self.query_one("#settings-enhance", Checkbox).value = config.enhance_with_ai
+            self._settings_loaded = True
+        elif self.view != "settings":
+            self._settings_loaded = False
+            self._settings_dirty = False
+        form.display = self.view == "settings"
+
+    def _update_buttons(self) -> None:
+        state = self.state.monitoring_state
+        running = state in ("running", "starting")
+        self.query_one("#btn-start", Button).disabled = running
+        self.query_one("#btn-stop", Button).disabled = state == "stopped"
+
+    # -- monitoring callbacks (delivered from the service loop task) ------
     def _on_state_change(self, state: MonitoringState) -> None:
         self.call_later(self._render_state, state)
 
     def _render_state(self, state: MonitoringState) -> None:
-        self._notify(f"monitoring {state.value}", "ok" if state is MonitoringState.RUNNING else "warn")
-        self._refresh_panels()
+        self._notify(
+            f"monitoring {state.value}", "ok" if state is MonitoringState.RUNNING else "warn"
+        )
+        self._sync_state()
+        self._render_page()
+
+    def _on_cycle(self, outcome: CycleOutcome) -> None:
+        self.call_later(self._apply_cycle, outcome)
+
+    def _apply_cycle(self, outcome: CycleOutcome) -> None:
+        self.state.record_cycle(
+            CycleRecord(
+                cycle=outcome.cycle,
+                entries=outcome.collected_entries,
+                submitted=outcome.submitted,
+                error=outcome.error,
+                at=datetime.now(),
+            )
+        )
+        self._sync_state()
+        self._refresh_live()
 
     def _on_result(self, view: AnalysisView, outcome: CycleOutcome) -> None:
         self.call_later(self._apply_result, view, outcome)
 
     def _apply_result(self, view: AnalysisView, outcome: CycleOutcome) -> None:
-        self.cycles = outcome.cycle
-        self.submitted += 1
-        self.events += outcome.collected_entries
-        self.techniques_found = view.technique_count
         self._latest = view
-        self._fill_techniques(view)
+        self.state.latest_analysis = view
+        self.state.analysis_status = "loaded"
+        self.state.analysis_error = None
+        self.techniques_found = view.technique_count
+        self._sync_state()
+        self._refresh_live()
 
         stamp = datetime.now().strftime("%H:%M:%S")
         summary = (view.summary or "").strip().replace("\n", " ")
@@ -378,24 +1025,58 @@ class ForensIQApp(App):
                 if isinstance(technique.relevance_score, float)
                 else ""
             )
-            self._write_stream(f"[{MUTED}]             {escape(label)} {escape(name)}{score}[/{MUTED}]")
+            self._write_stream(
+                f"[{MUTED}]             {escape(label)} {escape(name)}{score}[/{MUTED}]"
+            )
         if view.summary:
             self._notify(f"analysis: {view.summary.strip()[:90]}", "info")
-        self._refresh_panels()
 
     def _on_error(self, exc: Exception, outcome: CycleOutcome | None) -> None:
         self.call_later(self._render_error, exc, outcome)
 
     def _render_error(self, exc: Exception, outcome: CycleOutcome | None) -> None:
-        message = str(exc) or type(exc).__name__
-        self._notify(f"backend error: {message}", "bad")
-        self._refresh_panels()
+        self._notify(f"backend error: {self._short_error(exc)}", "bad")
+        self._sync_state()
+        self._refresh_live()
 
-    # -- clock
+    def _refresh_live(self) -> None:
+        """Update live values without disturbing text inputs."""
+        if self._closing:
+            return
+        try:
+            self._render_cards()
+            self.query_one("#monitor-detail", Static).update(self._monitor_markup())
+            self.query_one("#page-detail-text", Static).update(self._detail_markup())
+            self._update_buttons()
+            if self.view in ("dashboard", "monitoring", "analysis"):
+                self._render_table()
+                self._render_detail_view()
+            self.query_one("#view-note", Label).update(self._view_note())
+        except Exception:  # pragma: no cover - teardown
+            pass
+
+    # -- terminal size ----------------------------------------------------
+    def on_resize(self, event) -> None:
+        """Keep the shell usable on short terminals without moving anything.
+
+        Below 30 rows the 12-row event stream is hidden so the panels keep a
+        scrollable height; below 100 columns the fixed 44-column monitor panel
+        narrows to 34. Neither change touches the approved 120x40 layout.
+        """
+        self._compact = event.size.height < 30 or event.size.width < 90
+        try:
+            self.query_one("#monitor-panel").styles.width = 34 if event.size.width < 100 else 44
+            self.query_one("#stream-panel").display = (
+                self.view in ("dashboard", "monitoring") and not self._compact
+            )
+        except Exception:  # pragma: no cover - during mount/teardown
+            pass
+
+    # -- clock ------------------------------------------------------------
     def _clock_tick(self) -> None:
-        """Refresh live counters; the service owns all state."""
-        if self.service.monitoring is not None:
-            self._refresh_panels()
+        if self.service.monitoring is not None or self.state.monitoring_state != "stopped":
+            self._sync_state()
+            self._refresh_live()
 
     # -- actions ----------------------------------------------------------
     def action_goto(self, key: str) -> None:
@@ -405,7 +1086,9 @@ class ForensIQApp(App):
             if nav_key == key:
                 list_view.index = index
                 break
-        self._refresh_panels()
+        self._sync_state()
+        self._render_page()
+        self.run_worker(self._load_view(key), group="view-load", exclusive=True)
 
     def action_login(self) -> None:
         if self.service.is_authenticated:
@@ -416,10 +1099,15 @@ class ForensIQApp(App):
     def _login_finished(self, success: bool | None) -> None:
         if not success:
             self._notify("login cancelled", "warn")
-            self._refresh_panels()
+            self._sync_state()
+            self._render_page()
             return
-        self._notify(f"signed in as {self._current_username() or 'unknown'}", "ok")
-        self._refresh_panels()
+        self.state.authenticated = True
+        self.state.username = self.service.auth.session.username if self.service.auth.session else None
+        self._notify(f"signed in as {self.state.username or 'unknown'}", "ok")
+        self._sync_state()
+        self._render_page()
+        self.run_worker(self._refresh_dashboard(), group="view-load", exclusive=True)
 
     async def action_logout(self) -> None:
         if self.service.monitoring is not None:
@@ -428,10 +1116,11 @@ class ForensIQApp(App):
             except (asyncio.TimeoutError, Exception):  # noqa: BLE001 - logout must not block
                 pass
         self.service.logout()
-        self.query_one("#techniques", DataTable).clear(columns=False)
-        self.query_one("#techniques", DataTable).add_row("-", "no analysis yet", "-")
+        self.state.reset_for_logout()
+        self._latest = None
         self._notify("signed out; local token discarded", "warn")
-        self._refresh_panels()
+        self._sync_state()
+        self._render_page()
 
     async def action_start_monitoring(self) -> None:
         monitoring = self.service.monitoring
@@ -453,6 +1142,7 @@ class ForensIQApp(App):
                 on_state_change=self._on_state_change,
                 on_result=self._on_result,
                 on_error=self._on_error,
+                on_cycle=self._on_cycle,
             )
         except ForensIQError as exc:
             self._notify(f"cannot start monitoring: {exc}", "bad")
@@ -465,8 +1155,10 @@ class ForensIQApp(App):
         self.events = 0
         self.submitted = 0
         self.techniques_found = 0
+        self.state.cycle_log.clear()
+        self._sync_state()
         self._notify("monitoring started", "ok")
-        self._refresh_panels()
+        self._render_page()
 
     async def action_stop_monitoring(self) -> None:
         if self.service.monitoring is None:
@@ -480,7 +1172,8 @@ class ForensIQApp(App):
             self._notify(f"monitoring stop failed: {exc}", "bad")
         else:
             self._notify("monitoring stopped", "warn")
-        self._refresh_panels()
+        self._sync_state()
+        self._render_page()
 
     async def action_tick(self) -> None:
         monitoring = self.service.monitoring
@@ -495,10 +1188,50 @@ class ForensIQApp(App):
         if outcome is None:
             self._notify("monitoring is not running", "warn")
 
+    # -- settings ---------------------------------------------------------
+    def _save_settings(self) -> None:
+        error_label = self.query_one("#form-error", Label)
+        error_label.update("")
+        try:
+            url = self.query_one("#settings-url", Input).value.strip().rstrip("/")
+            if not url.lower().startswith(("http://", "https://")):
+                raise ConfigurationError("backend url must start with http:// or https://")
+            try:
+                interval = int(self.query_one("#settings-interval", Input).value.strip())
+                max_results = int(self.query_one("#settings-max-results", Input).value.strip())
+            except ValueError as exc:
+                raise ConfigurationError("interval and max results must be whole numbers") from exc
+            raw_sources = [
+                part.strip()
+                for part in self.query_one("#settings-sources", Input).value.split(",")
+                if part.strip()
+            ]
+            sources = self.service.collector.validate_sources(raw_sources) if raw_sources else ()
+            enhance = self.query_one("#settings-enhance", Checkbox).value
+            config: ClientConfig = self.service.configure_monitoring(
+                base_url=url,
+                interval_seconds=interval,
+                max_results=max_results,
+                sources=tuple(sources),
+                enhance_with_ai=bool(enhance),
+            )
+        except ForensIQError as exc:
+            error_label.update(escape(str(exc)))
+            return
+        except Exception as exc:  # noqa: BLE001 - validation must never crash the UI
+            error_label.update(escape(f"cannot save: {type(exc).__name__}"))
+            return
+        self._settings_loaded = False
+        self._settings_dirty = False
+        self._notify(
+            f"configuration saved: {config.base_url} every {config.interval_seconds}s",
+            "ok",
+        )
+        self._sync_state()
+        self._render_page()
+        self.run_worker(self._refresh_dashboard(), group="view-load", exclusive=True)
+
     # -- shutdown ---------------------------------------------------------
-    # ``q``/Ctrl+C use Textual's own ``quit`` action, which is asynchronous and
-    # only calls ``exit()``. Shutdown work happens in ``on_unmount`` so the
-    # framework's own teardown is never blocked mid-keypress.
     async def _close_service(self) -> None:
         """Cancel monitoring and close HTTP, bounded so exit cannot hang.
 
@@ -517,23 +1250,34 @@ class ForensIQApp(App):
             pass
 
     async def on_unmount(self) -> None:
-        """Stop monitoring and close HTTP on every exit path (q, Ctrl+C, stop)."""
         await self._close_service()
 
     # -- events -----------------------------------------------------------
     def on_list_view_selected(self, event: ListView.Selected) -> None:
         item_id = event.item.id or ""
         if item_id.startswith("nav-"):
-            self.view = item_id.removeprefix("nav-")
-            self._refresh_panels()
+            self.action_goto(item_id.removeprefix("nav-"))
+
+    def on_input_changed(self, event: Input.Changed) -> None:
+        if event.input.id and event.input.id.startswith("settings-"):
+            self._settings_dirty = True
 
     def on_button_pressed(self, event: Button.Pressed) -> None:
-        if event.button.id == "btn-start":
+        button_id = event.button.id
+        if button_id == "btn-start":
             self.run_worker(self.action_start_monitoring(), exclusive=True)
-        elif event.button.id == "btn-stop":
+        elif button_id == "btn-stop":
             self.run_worker(self.action_stop_monitoring(), exclusive=True)
-        elif event.button.id == "btn-tick":
+        elif button_id == "btn-tick":
             self.run_worker(self.action_tick(), exclusive=True)
+        elif button_id == "btn-save-settings":
+            self._save_settings()
+        elif button_id == "btn-knowledge-search":
+            self.run_worker(self._run_knowledge_search(), exclusive=True)
+
+    def on_input_submitted(self, event: Input.Submitted) -> None:
+        if event.input.id == "knowledge-query":
+            self.run_worker(self._run_knowledge_search(), exclusive=True)
 
 
 def main() -> None:

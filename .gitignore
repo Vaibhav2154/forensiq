@@ -1,6 +1,7 @@
 .mcp.json
 .freebuff
-docs/
+/docs/
+/client/
 server/frameworks/
 LogIQ-main.zip
 forensiq_cli.egg-info/
