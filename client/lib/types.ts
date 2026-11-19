@@ -495,3 +495,37 @@ export interface InvestigationConfig {
   [key: string]: unknown;
 }
 
+// ---------------------------------------------------------------------------
+// Stored Analysis Gemini Chatbot Models
+// ---------------------------------------------------------------------------
+
+export interface AnalysisChatTurn {
+  role: 'user' | 'assistant';
+  content: string;
+}
+
+export interface AnalysisChatRequest {
+  message: string;
+  conversation_history?: AnalysisChatTurn[];
+  include_recent_context?: boolean;
+}
+
+export interface HistoryChatRequest {
+  message: string;
+  analysis_ids?: string[];
+  limit?: number;
+  conversation_history?: AnalysisChatTurn[];
+}
+
+export interface AnalysisChatResponse {
+  analysis_id?: string | null;
+  analyses_consulted: string[];
+  answer: string;
+  referenced_event_ids: string[];
+  referenced_knowledge_ids: string[];
+  follow_up_questions: string[];
+  evidence_caveats: string[];
+  model_used: string;
+  processing_time_ms: number;
+}
+

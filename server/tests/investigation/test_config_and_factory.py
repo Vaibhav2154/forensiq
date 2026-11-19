@@ -73,6 +73,7 @@ def test_factory_custom_runner_returns_validated_schema() -> None:
     settings = InvestigationSettings(
         _env_file=None,
         default_gemini_api_key="test-key",
+        gemini_model="gemini-2.5-flash",
     )
 
     async def fake_runner(role, schema, system_prompt, user_prompt):

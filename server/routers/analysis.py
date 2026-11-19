@@ -1,9 +1,17 @@
 from fastapi import APIRouter, HTTPException, Depends
 from typing import Dict, Any, List, Optional
 import time
-from model.logs_model import LogAnalysisRequest, LogAnalysisResponse, AttackTechnique
+from model.logs_model import (
+    LogAnalysisRequest,
+    LogAnalysisResponse,
+    AttackTechnique,
+    AnalysisChatRequest,
+    HistoryChatRequest,
+    AnalysisChatResponse,
+)
 from model.analysis_model import AnalysisHistoryItem, UserAnalyticsStats
 from services import GeminiService
+from services.analysis_chat_service import AnalysisChatService, analysis_chat_service
 from services.investigation import (
     EnrichedKnowledgeItem,
     InvestigationService,
@@ -21,18 +29,22 @@ router = APIRouter(prefix="/api/v1", tags=["Log Analysis"])
 gemini_service: Optional[GeminiService] = None
 knowledge_service: Optional[KnowledgeService] = None
 investigation_service: Optional[InvestigationService] = None
+chat_service: AnalysisChatService = analysis_chat_service
 
 
 def set_services(
     gemini: Optional[GeminiService],
     knowledge: Optional[KnowledgeService],
     investigation: Optional[InvestigationService] = None,
+    chat: Optional[AnalysisChatService] = None,
 ):
     """Set service instances for the router."""
-    global gemini_service, knowledge_service, investigation_service
+    global gemini_service, knowledge_service, investigation_service, chat_service
     gemini_service = gemini
     knowledge_service = knowledge
     investigation_service = investigation
+    if chat is not None:
+        chat_service = chat
 
 
 def _hit_to_technique_dict(hit) -> Dict[str, Any]:
@@ -170,6 +182,7 @@ async def analyze_logs(request: LogAnalysisRequest, current_user: dict = Depends
                 request=request,
                 response=response,
             )
+            response.id = analysis_id
             logger.info(f"Stored analysis result with ID {analysis_id} for user {current_user['username']}")
         except Exception as e:
             logger.error(f"Failed to store analysis result: {str(e)}")
@@ -325,6 +338,138 @@ async def get_analysis_history(
         raise HTTPException(
             status_code=500,
             detail=f"Failed to get analysis history: {str(e)}"
+        )
+
+
+@router.post("/history/chat", response_model=AnalysisChatResponse)
+async def chat_across_stored_analyses(
+    request: HistoryChatRequest,
+    current_user: dict = Depends(get_current_user),
+) -> AnalysisChatResponse:
+    """
+    Ask a Gemini-powered chatbot questions across the authenticated user's stored analyses
+    decrypted from MongoDB.
+    """
+    try:
+        user_id = current_user["username"]
+        target_ids: List[str] = []
+
+        if request.analysis_ids:
+            target_ids = list(dict.fromkeys(aid.strip() for aid in request.analysis_ids if aid.strip()))
+        else:
+            history = await analysis_storage_service.get_user_analysis_history(
+                user_id=user_id,
+                limit=request.limit,
+                offset=0,
+            )
+            for item in history:
+                aid = item["id"] if isinstance(item, dict) else item.id
+                if aid:
+                    target_ids.append(aid)
+
+        if not target_ids:
+            raise HTTPException(
+                status_code=404,
+                detail="No stored analyses found for this user to chat about.",
+            )
+
+        decrypted_analyses: List[Dict[str, Any]] = []
+        for aid in target_ids[: request.limit]:
+            doc = await analysis_storage_service.get_analysis_result(
+                user_id=user_id,
+                analysis_id=aid,
+            )
+            if doc:
+                doc_with_id = dict(doc)
+                doc_with_id.setdefault("id", aid)
+                decrypted_analyses.append(doc_with_id)
+
+        if not decrypted_analyses:
+            raise HTTPException(
+                status_code=404,
+                detail="Could not retrieve any matching stored analyses for this user.",
+            )
+
+        return await chat_service.chat_about_analyses(
+            message=request.message,
+            primary_analysis=None,
+            additional_analyses=decrypted_analyses,
+            conversation_history=request.conversation_history,
+        )
+    except HTTPException:
+        raise
+    except RuntimeError as e:
+        raise HTTPException(status_code=503, detail=str(e))
+    except Exception as e:
+        logger.error(f"Error in stored history chat: {str(e)}")
+        raise HTTPException(
+            status_code=500,
+            detail=f"Failed to chat with stored analyses: {str(e)}",
+        )
+
+
+@router.post("/history/{analysis_id}/chat", response_model=AnalysisChatResponse)
+async def chat_about_stored_analysis(
+    analysis_id: str,
+    request: AnalysisChatRequest,
+    current_user: dict = Depends(get_current_user),
+) -> AnalysisChatResponse:
+    """
+    Ask a Gemini-powered chatbot detailed questions about a specific stored multi-agent
+    analysis decrypted from MongoDB (optionally including compact recent history context).
+    """
+    try:
+        user_id = current_user["username"]
+        primary = await analysis_storage_service.get_analysis_result(
+            user_id=user_id,
+            analysis_id=analysis_id,
+        )
+        if not primary:
+            raise HTTPException(
+                status_code=404,
+                detail="Stored analysis result not found",
+            )
+
+        primary_with_id = dict(primary)
+        primary_with_id.setdefault("id", analysis_id)
+
+        extras: List[Dict[str, Any]] = []
+        if request.include_recent_context:
+            history = await analysis_storage_service.get_user_analysis_history(
+                user_id=user_id,
+                limit=6,
+                offset=0,
+            )
+            for item in history:
+                other_id = item["id"] if isinstance(item, dict) else item.id
+                if not other_id or other_id == analysis_id:
+                    continue
+                other_doc = await analysis_storage_service.get_analysis_result(
+                    user_id=user_id,
+                    analysis_id=other_id,
+                )
+                if other_doc:
+                    other_with_id = dict(other_doc)
+                    other_with_id.setdefault("id", other_id)
+                    extras.append(other_with_id)
+                if len(extras) >= 4:
+                    break
+
+        return await chat_service.chat_about_analyses(
+            message=request.message,
+            primary_analysis=primary_with_id,
+            additional_analyses=extras,
+            conversation_history=request.conversation_history,
+        )
+    except HTTPException:
+        raise
+    except RuntimeError as e:
+        raise HTTPException(status_code=503, detail=str(e))
+    except Exception as e:
+        logger.error(f"Error in stored analysis chat for {analysis_id}: {str(e)}")
+        raise HTTPException(
+            status_code=500,
+            detail=f"Failed to chat about stored analysis: {str(e)}",
         )
 
 @router.get("/history/{analysis_id}", response_model=LogAnalysisResponse)

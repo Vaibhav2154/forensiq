@@ -1,5 +1,5 @@
 from pydantic import BaseModel, Field
-from typing import Optional, List, Dict, Any
+from typing import Optional, List, Dict, Any, Literal
 from datetime import datetime
 
 class LogAnalysisRequest(BaseModel):
@@ -19,6 +19,7 @@ class AttackTechnique(BaseModel):
 
 class LogAnalysisResponse(BaseModel):
     """Response model for log analysis."""
+    id: Optional[str] = Field(None, description="Stored MongoDB analysis ID when persisted")
     summary: str = Field(..., description="Structured summary of observed log events")
     matched_techniques: List[AttackTechnique] = Field(default_factory=list, description="Verified MITRE ATT&CK techniques retrieved from OKF/Cognee")
     enhanced_analysis: Optional[str] = Field(None, description="Evidence-backed multi-agent investigation report (Markdown)")
@@ -26,6 +27,55 @@ class LogAnalysisResponse(BaseModel):
     visualization_metrics: Optional[Dict[str, Any]] = Field(None, description="Deterministic metrics for threat visualization dashboard")
     analysis_timestamp: datetime = Field(default_factory=datetime.utcnow, description="When the analysis was performed")
     processing_time_ms: Optional[float] = Field(None, description="Processing time in milliseconds")
+
+
+class AnalysisChatTurn(BaseModel):
+    """A single turn in a multi-turn conversation about stored analysis results."""
+    role: Literal["user", "assistant"] = Field(..., description="Speaker role")
+    content: str = Field(..., min_length=1, max_length=6000, description="Turn message content")
+
+
+class AnalysisChatRequest(BaseModel):
+    """Request payload for chatting with Gemini about a specific stored analysis."""
+    message: str = Field(..., min_length=1, max_length=4000, description="Analyst question about the stored analysis")
+    conversation_history: List[AnalysisChatTurn] = Field(
+        default_factory=list,
+        max_length=20,
+        description="Optional prior turns for multi-turn conversation continuity",
+    )
+    include_recent_context: bool = Field(
+        default=False,
+        description="When True, also include compact context from up to 4 other recent stored analyses for cross-incident comparison",
+    )
+
+
+class HistoryChatRequest(BaseModel):
+    """Request payload for chatting with Gemini across multiple stored analyses."""
+    message: str = Field(..., min_length=1, max_length=4000, description="Analyst question across stored analyses")
+    analysis_ids: Optional[List[str]] = Field(
+        default=None,
+        max_length=10,
+        description="Optional list of specific stored analysis IDs to inspect (defaults to most recent analyses)",
+    )
+    limit: int = Field(default=5, ge=1, le=10, description="Maximum number of recent stored analyses to load when analysis_ids is omitted")
+    conversation_history: List[AnalysisChatTurn] = Field(
+        default_factory=list,
+        max_length=20,
+        description="Optional prior turns for multi-turn conversation continuity",
+    )
+
+
+class AnalysisChatResponse(BaseModel):
+    """Grounded Gemini chatbot response for stored multi-agent analyses."""
+    analysis_id: Optional[str] = Field(None, description="Primary MongoDB analysis ID (None for cross-history chat)")
+    analyses_consulted: List[str] = Field(default_factory=list, description="MongoDB analysis IDs included in context")
+    answer: str = Field(..., description="Evidence-grounded Markdown answer from Gemini")
+    referenced_event_ids: List[str] = Field(default_factory=list, description="Verified event_ids cited from stored analysis")
+    referenced_knowledge_ids: List[str] = Field(default_factory=list, description="Verified MITRE ATT&CK / CVE IDs cited from stored analysis")
+    follow_up_questions: List[str] = Field(default_factory=list, description="Suggested next questions for the analyst")
+    evidence_caveats: List[str] = Field(default_factory=list, description="Distinctions between observed facts, inferences, and missing telemetry")
+    model_used: str = Field(default="", description="Gemini model name used to generate the answer")
+    processing_time_ms: float = Field(default=0.0, ge=0.0, description="End-to-end chatbot processing time in milliseconds")
 
 class DatabaseStats(BaseModel):
     """Model for database statistics."""

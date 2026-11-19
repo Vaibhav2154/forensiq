@@ -169,6 +169,7 @@ class AnalysisStorageService:
             investigation = decrypted_data.get("investigation")
             processing_time_ms = doc.get("processing_time_ms", 0)
             return {
+                "id": analysis_id,
                 "summary": decrypted_data.get("summary"),
                 "matched_techniques": techniques,
                 "enhanced_analysis": decrypted_data.get("enhanced_analysis"),

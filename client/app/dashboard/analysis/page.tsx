@@ -4,6 +4,7 @@ import { useRouter } from 'next/navigation'
 import Navbar from '../../../components/navbar'
 import ToastNotification from '../../../components/toast-notification'
 import InvestigationReportPanel from '../../../components/investigation-report-panel'
+import AnalysisChatModal from '../../../components/analysis-chat-modal'
 import { useToast } from '../../../hooks/useToast'
 import { fetchInvestigationConfig } from '../../../lib/api'
 import type { InvestigationConfig, LogAnalysisResponse } from '../../../lib/types'
@@ -29,6 +30,7 @@ const AnalysisPage = () => {
   const [showCursor, setShowCursor] = useState(true);
   const [isMobile, setIsMobile] = useState(false);
   const [showVisualizationButton, setShowVisualizationButton] = useState(false);
+  const [showChatModal, setShowChatModal] = useState(false);
   const [invConfig, setInvConfig] = useState<InvestigationConfig | null>(null);
 
   const fullTerminalText = '> LOG_ANALYZER.EXE --MODE=THREAT_DETECTION --FRAMEWORK=MITRE';
@@ -418,6 +420,15 @@ const AnalysisPage = () => {
                         [VIEW_ENHANCED_VISUALIZATION]
                       </button>
                     )}
+                    {analysis.id && (
+                      <button
+                        type="button"
+                        onClick={() => setShowChatModal(true)}
+                        className="bg-cyan-900/30 border border-cyan-500/50 hover:border-cyan-300 hover:bg-cyan-500/20 px-2 sm:px-3 py-1 text-cyan-300 text-xs sm:text-sm transition-colors cursor-pointer"
+                      >
+                        [ASK_AI_CHATBOT]
+                      </button>
+                    )}
                   </div>
                 </div>
 
@@ -546,6 +557,27 @@ const AnalysisPage = () => {
           [ANALYSIS@LOGIQ]#
         </div>
       </div>
+
+      <AnalysisChatModal
+        isOpen={showChatModal}
+        onClose={() => setShowChatModal(false)}
+        initialAnalysisId={analysis?.id ?? null}
+        availableAnalyses={
+          analysis?.id
+            ? [
+                {
+                  id: String(analysis.id),
+                  label: 'CURRENT_ANALYSIS',
+                  severity:
+                    analysis.investigation?.overall_threat_level ||
+                    analysis.visualization_metrics?.overall_threat_level,
+                  techniquesCount: analysis.matched_techniques.length,
+                  analysis,
+                },
+              ]
+            : []
+        }
+      />
 
       <style jsx>{`
         .slider::-webkit-slider-thumb {

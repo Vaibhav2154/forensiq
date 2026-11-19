@@ -1,7 +1,8 @@
 'use client'
 import Navbar from '@/components/navbar'
 import InvestigationReportPanel from '@/components/investigation-report-panel'
-import React, { useState, useEffect, useCallback } from 'react'
+import AnalysisChatModal, { type StoredAnalysisOption } from '@/components/analysis-chat-modal'
+import React, { useState, useEffect, useCallback, useMemo } from 'react'
 import Link from 'next/link'
 import { useRouter } from 'next/navigation'
 import MarkdownRenderer from '@/hooks/MarkDownRenderer'
@@ -48,6 +49,8 @@ const DashboardPage = () => {
   const [singleAnalysis, setSingleAnalysis] = useState<any | null>(null)
   const [selectedAnalysis, setSelectedAnalysis] = useState<any | null>(null)
   const [showModal, setShowModal] = useState(false)
+  const [showChatModal, setShowChatModal] = useState(false)
+  const [chatAnalysisId, setChatAnalysisId] = useState<string | null>(null)
   const [loading, setLoading] = useState(false)
   const [error, setError] = useState<string | null>(null)
   const [userProfile, setUserProfile] = useState<any | null>(null)
@@ -363,6 +366,15 @@ const recentSingleAnalyses  = async(elementId:string)=>{
     setSelectedAnalysis(null)
   }, [])
 
+  const openAnalysisChat = useCallback((analysisId: string | null) => {
+    setChatAnalysisId(analysisId)
+    setShowChatModal(true)
+  }, [])
+
+  const closeAnalysisChat = useCallback(() => {
+    setShowChatModal(false)
+  }, [])
+
   const handleDeleteAnalysis = useCallback(async (analysisId?: string) => {
     if (!analysisId) return;
     if (typeof window !== 'undefined' && !window.confirm('Delete this stored analysis permanently?')) {
@@ -665,6 +677,29 @@ return istDate;
     return total + (Array.isArray(analysis?.matched_techniques) ? analysis.matched_techniques.length : 0)
   }, 0)
 
+  const chatAnalysisOptions = useMemo<StoredAnalysisOption[]>(() => {
+    return allSingleAnalysis
+      .filter((a) => Boolean(a?.id))
+      .map((analysis, index) => {
+        const sev =
+          analysis?.investigation?.overall_threat_level ||
+          analysis?.visualization_metrics?.overall_threat_level ||
+          getSeverityFromSummary(analysis?.summary);
+        return {
+          id: String(analysis.id),
+          label: `ANALYSIS_#${(currentPage - 1) * itemsPerPage + index + 1}`,
+          severity: String(sev),
+          timestamp: analysis?.analysis_timestamp
+            ? convertUSToIST(analysis.analysis_timestamp).toLocaleString()
+            : undefined,
+          techniquesCount: Array.isArray(analysis?.matched_techniques)
+            ? analysis.matched_techniques.length
+            : 0,
+          analysis,
+        };
+      });
+  }, [allSingleAnalysis, currentPage, itemsPerPage, getSeverityFromSummary]);
+
   return (
     <div className='relative bg-black min-h-screen w-full text-white overflow-x-hidden'>
       {/* Terminal grid overlay */}
@@ -909,12 +944,23 @@ return istDate;
         {/* Terminal Recent Analyses with Pagination */}
         <div className={`bg-black/80 backdrop-blur-sm border border-green-500/30 rounded-2xl p-4 sm:p-6 transform transition-all duration-1000 delay-600 ${isVisible ? 'translate-y-0 opacity-100' : 'translate-y-10 opacity-0'}`}>
           <div>
-            <h2 className="text-lg sm:text-xl font-semibold mb-4 sm:mb-6 flex items-center text-green-400">
-              <span className="w-2 h-2 bg-green-500 rounded-full mr-2 sm:mr-3 animate-pulse flex-shrink-0"></span>
+            <h2 className="text-lg sm:text-xl font-semibold mb-4 sm:mb-6 flex flex-wrap items-center gap-2 text-green-400">
+              <span className="w-2 h-2 bg-green-500 rounded-full mr-1 sm:mr-2 animate-pulse flex-shrink-0"></span>
               <span className="break-words">[RECENT_ANALYSES.LOG]</span>
-              <span className="ml-auto text-sm text-gray-400">
-                [PAGE_{currentPage}/{totalPages}]
-              </span>
+              <div className="ml-auto flex items-center gap-2 sm:gap-3">
+                {allSingleAnalysis.length > 0 && (
+                  <button
+                    type="button"
+                    onClick={() => openAnalysisChat(null)}
+                    className="px-2.5 py-1 bg-cyan-950/40 border border-cyan-500/60 hover:border-cyan-300 hover:bg-cyan-500/20 text-cyan-300 text-xs font-mono transition-colors cursor-pointer"
+                  >
+                    [ASK_AI_HISTORY]
+                  </button>
+                )}
+                <span className="text-sm text-gray-400">
+                  [PAGE_{currentPage}/{totalPages}]
+                </span>
+              </div>
             </h2>
             
             {loading ? (
@@ -995,6 +1041,18 @@ return istDate;
                         <span className="text-green-400">
                           [COMPLETED]
                         </span>
+                        {analysis?.id && (
+                          <button
+                            type="button"
+                            onClick={(e) => {
+                              e.stopPropagation();
+                              openAnalysisChat(String(analysis.id));
+                            }}
+                            className="px-2 py-1 bg-cyan-900/30 border border-cyan-500/50 hover:border-cyan-300 hover:bg-cyan-500/20 text-cyan-300 transition-colors text-xs cursor-pointer"
+                          >
+                            [ASK_AI]
+                          </button>
+                        )}
                         <span className="px-2 py-1 bg-purple-900/30 border border-purple-500/30 hover:border-purple-400 hover:bg-purple-500/20 text-purple-400 hover:text-purple-300 transition-colors text-xs">
                           [VIEW]
                         </span>
@@ -1361,6 +1419,19 @@ return istDate;
                   >
                     [VIEW_VISUALIZATION]
                   </button>
+                  {selectedAnalysis?.id && (
+                    <button
+                      type="button"
+                      onClick={() => {
+                        const targetId = String(selectedAnalysis.id);
+                        closeModal();
+                        openAnalysisChat(targetId);
+                      }}
+                      className="px-4 py-2 bg-black border-2 border-green-500 hover:border-cyan-400 text-green-400 hover:text-cyan-300 font-medium transition-all duration-300 hover:shadow-[0_0_20px_rgba(0,255,150,0.4)] font-mono text-sm cursor-pointer"
+                    >
+                      [ASK_AI_CHATBOT]
+                    </button>
+                  )}
                   
                   <button
                     onClick={() => selectedAnalysis && exportMarkdownToPdf(selectedAnalysis.summary)}
@@ -1373,6 +1444,14 @@ return istDate;
             </div>
           </div>
         )}
+
+        {/* Stored Analysis Gemini Chatbot Modal */}
+        <AnalysisChatModal
+          isOpen={showChatModal}
+          onClose={closeAnalysisChat}
+          initialAnalysisId={chatAnalysisId}
+          availableAnalyses={chatAnalysisOptions}
+        />
       </div>
     </div>
   )

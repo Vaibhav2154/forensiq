@@ -1,6 +1,9 @@
 import type {
+  AnalysisChatRequest,
+  AnalysisChatResponse,
   BatchIngestRequest,
   HealthCheckResponse,
+  HistoryChatRequest,
   IngestionRunStatus,
   InvestigationConfig,
   InvestigationInput,
@@ -127,6 +130,28 @@ export function deleteAnalysisById(
     `/api/v1/history/${encodeURIComponent(analysisId)}`,
     { method: 'DELETE' }
   );
+}
+
+export function chatWithStoredAnalysis(
+  analysisId: string,
+  payload: AnalysisChatRequest
+): Promise<AnalysisChatResponse> {
+  return apiRequest<AnalysisChatResponse>(
+    `/api/v1/history/${encodeURIComponent(analysisId)}/chat`,
+    {
+      method: 'POST',
+      body: JSON.stringify(payload),
+    }
+  );
+}
+
+export function chatWithAnalysisHistory(
+  payload: HistoryChatRequest
+): Promise<AnalysisChatResponse> {
+  return apiRequest<AnalysisChatResponse>('/api/v1/history/chat', {
+    method: 'POST',
+    body: JSON.stringify(payload),
+  });
 }
 
 // ---------------------------------------------------------------------------
