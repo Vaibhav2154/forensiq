@@ -5,3 +5,4 @@
 server/frameworks/
 LogIQ-main.zip
 forensiq_cli.egg-info/
+/cli_agent/docs/
