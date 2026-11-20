@@ -19,9 +19,16 @@ from cli_agent.services.api_client import HttpResponse
 class FakeTransport:
     """Queued-response HTTP transport with request capture."""
 
-    def __init__(self, responses: list[Any] | None = None, *, error: Exception | None = None) -> None:
+    def __init__(
+        self,
+        responses: list[Any] | None = None,
+        *,
+        error: Exception | None = None,
+        delay: float = 0.0,
+    ) -> None:
         self.responses = list(responses or [])
         self.error = error
+        self.delay = delay
         self.requests: list[dict[str, Any]] = []
         self.closed = False
 
@@ -46,6 +53,10 @@ class FakeTransport:
                 "timeout": timeout,
             }
         )
+        if self.delay:
+            import asyncio
+
+            await asyncio.sleep(self.delay)
         if self.error is not None:
             raise self.error
         if not self.responses:
@@ -53,12 +64,16 @@ class FakeTransport:
         item = self.responses.pop(0)
         if isinstance(item, Exception):
             raise item
+        headers = None
         if isinstance(item, tuple):
-            status, body = item
+            if len(item) == 3:
+                status, body, headers = item
+            else:
+                status, body = item
         else:
             status, body = 200, item
         text = body if isinstance(body, str) else json.dumps(body)
-        return HttpResponse(status=status, text=text)
+        return HttpResponse(status=status, text=text, headers=headers)
 
     async def close(self) -> None:
         self.closed = True

@@ -418,12 +418,13 @@ async def test_api_client_sends_no_authorization_for_health(tmp_path) -> None:
     assert "Authorization" not in transport.requests[0]["headers"]
 
 
-async def test_monitoring_respects_the_backend_log_size_limit(tmp_path) -> None:
-    """A real 421-event batch exceeds logs max_length and used to get a 422."""
+async def test_monitoring_splits_oversized_batches_without_loss(tmp_path) -> None:
+    """60k characters are delivered as two ordered batches, not truncated."""
     oversized = "x" * 60_000
     transport = FakeTransport().queue(
         {"session_id": "sess-big"},
-        {"summary": "accepted", "matched_techniques": []},
+        {"summary": "first", "matched_techniques": []},
+        {"summary": "second", "matched_techniques": []},
     )
     service = build_service(
         tmp_path,
@@ -433,12 +434,35 @@ async def test_monitoring_respects_the_backend_log_size_limit(tmp_path) -> None:
     app = ForensIQApp(service=service, auto_probe=False)
     async with app.run_test(size=SIZE) as pilot:
         await pilot.press("s")
-        assert await wait_for(lambda: app.state.submitted == 1, timeout=5)
+        assert await wait_for(lambda: app.state.submitted == 2, timeout=5)
         analyze = [r for r in transport.requests if r["url"].endswith("/api/v1/analyze")]
-        assert analyze, "no submission was attempted"
-        payload = analyze[-1]["json"]["logs"]
-        assert len(payload) <= 50_000
-        assert "client truncated" in payload
-        assert app.state.truncated_cycles == 1
+        assert len(analyze) == 2, "the oversized event was not split into batches"
+        payloads = [request["json"]["logs"] for request in analyze]
+        assert all(len(payload) <= 50_000 for payload in payloads)
+        # No marker, no dropped characters: concatenation is the full event.
+        assert "client truncated" not in "".join(payloads)
+        assert "".join(payloads).count("x") == 60_000
+        assert app.state.pending_batches == 0
+        assert app.state.oversized_batches == 1
         await pilot.press("x")
         assert await wait_for(lambda: service.monitoring is None)
+
+
+@pytest.mark.parametrize("size", [(120, 40), (80, 24)])
+async def test_all_six_pages_open_at_supported_terminal_sizes(tmp_path, size) -> None:
+    """The approved six-page navigation works at both official terminal sizes."""
+    transport = FakeTransport().queue(HEALTH, {"analysis": None}, KNOWLEDGE_STATS, [])
+    service = build_service(tmp_path, transport)
+    app = ForensIQApp(service=service, auto_probe=False)
+    async with app.run_test(size=size) as pilot:
+        for key, view in (
+            ("1", "dashboard"),
+            ("2", "monitoring"),
+            ("3", "analysis"),
+            ("4", "knowledge"),
+            ("5", "sessions"),
+            ("6", "settings"),
+        ):
+            await goto(app, pilot, key)
+            assert app.view == view
+        assert app.theme in app.available_themes

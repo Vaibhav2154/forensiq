@@ -19,15 +19,24 @@ from __future__ import annotations
 
 import asyncio
 import json
+import random
 from dataclasses import dataclass
+from email.utils import parsedate_to_datetime
 from typing import Any, Awaitable, Callable, Mapping
 
 from .errors import MalformedResponseError, TransportError, error_from_status
 
 DEFAULT_TIMEOUT = 30.0
 DEFAULT_MAX_RETRIES = 2
+DEFAULT_POST_RETRY_ATTEMPTS = 3
+# GET/HEAD keep the conservative Phase 3 set.
 RETRYABLE_STATUS = frozenset({502, 503, 504})
+# An explicitly retryable POST (log-batch delivery) additionally tolerates
+# throttling and ambiguous upstream failures.  HTTP 500 is *not* retried: the
+# backend already answered, and the same payload is likely to fail again.
+TRANSIENT_POST_STATUS = frozenset({408, 425, 429, 502, 503, 504})
 IDEMPOTENT_METHODS = frozenset({"GET", "HEAD"})
+MAX_RETRY_DELAY = 10.0
 
 
 @dataclass(frozen=True)
@@ -36,6 +45,16 @@ class HttpResponse:
 
     status: int
     text: str
+    headers: Mapping[str, str] = None  # type: ignore[assignment]
+
+    def header(self, name: str) -> str | None:
+        if not self.headers:
+            return None
+        lowered = name.lower()
+        for key, value in self.headers.items():
+            if key.lower() == lowered:
+                return value
+        return None
 
 
 Transport = Callable[
@@ -104,6 +123,7 @@ class ApiClient:
         timeout: float = DEFAULT_TIMEOUT,
         max_retries: int = DEFAULT_MAX_RETRIES,
         token_provider: Callable[[], str | None] | None = None,
+        sleep: Callable[[float], Awaitable[None]] | None = None,
     ) -> None:
         if not base_url or not base_url.strip():
             raise ValueError("base_url must be a non-empty URL")
@@ -112,6 +132,7 @@ class ApiClient:
         self.timeout = float(timeout)
         self.max_retries = max(0, int(max_retries))
         self._token_provider = token_provider
+        self._sleep = sleep or asyncio.sleep
 
     # -- helpers ---------------------------------------------------------
     def url(self, path: str) -> str:
@@ -126,7 +147,30 @@ class ApiClient:
         return headers
 
     def _backoff(self, attempt: int) -> float:
-        return min(0.25 * (2**attempt), 2.0)
+        """Capped exponential backoff with jitter (never a tight loop)."""
+        base = min(0.5 * (2**attempt), MAX_RETRY_DELAY)
+        return base * random.uniform(0.5, 1.0)
+
+    @staticmethod
+    def _retry_after(response: HttpResponse) -> float | None:
+        """Parse ``Retry-After`` seconds or HTTP-date, capped for UI sanity."""
+        value = response.header("Retry-After")
+        if not value:
+            return None
+        value = value.strip()
+        try:
+            seconds = float(value)
+        except ValueError:
+            try:
+                when = parsedate_to_datetime(value)
+            except (TypeError, ValueError):
+                return None
+            import time as _time
+
+            seconds = when.timestamp() - _time.time()
+        if seconds < 0:
+            return 0.0
+        return min(seconds, MAX_RETRY_DELAY)
 
     # -- request core ----------------------------------------------------
     async def request(
@@ -137,11 +181,29 @@ class ApiClient:
         json_body: Any = None,
         authenticated: bool = True,
         idempotent: bool | None = None,
+        retry_transient: bool = False,
+        retry_attempts: int | None = None,
     ) -> Any:
+        """Perform one request.
+
+        ``retry_transient`` opts a non-idempotent call (batch delivery) into
+        bounded retries for throttling and ambiguous upstream failures.  The
+        caller accepts that a retry after an ambiguous timeout may duplicate
+        analysis work; the backend has no idempotency key.
+        """
         method = method.upper()
         if idempotent is None:
             idempotent = method in IDEMPOTENT_METHODS
-        attempts = self.max_retries + 1 if idempotent else 1
+        if idempotent:
+            attempts = self.max_retries + 1
+            retry_status = RETRYABLE_STATUS
+        elif retry_transient:
+            attempts = max(1, int(retry_attempts or DEFAULT_POST_RETRY_ATTEMPTS))
+            retry_status = TRANSIENT_POST_STATUS
+        else:
+            attempts = 1
+            retry_status = frozenset()
+
         last_error: TransportError | None = None
 
         for attempt in range(attempts):
@@ -157,13 +219,17 @@ class ApiClient:
                 last_error = (
                     exc if isinstance(exc, TransportError) else TransportError(str(exc))
                 )
-                if attempt + 1 < attempts:
-                    await asyncio.sleep(self._backoff(attempt))
+                if retry_transient and attempt + 1 < attempts:
+                    await self._sleep(self._backoff(attempt))
+                    continue
+                if idempotent and attempt + 1 < attempts:
+                    await self._sleep(self._backoff(attempt))
                     continue
                 raise last_error
 
-            if response.status in RETRYABLE_STATUS and attempt + 1 < attempts:
-                await asyncio.sleep(self._backoff(attempt))
+            if response.status in retry_status and attempt + 1 < attempts:
+                delay = self._retry_after(response)
+                await self._sleep(delay if delay is not None else self._backoff(attempt))
                 continue
             return self._handle(path, response)
 
@@ -174,7 +240,9 @@ class ApiClient:
 
         if response.status >= 400:
             detail = _error_detail(payload) or (response.text or "").strip()[:200] or None
-            raise error_from_status(response.status, detail=detail, payload=payload)
+            error = error_from_status(response.status, detail=detail, payload=payload)
+            error.retry_after = self._retry_after(response)
+            raise error
 
         if payload is _UNPARSEABLE:
             # A 2xx with a body we cannot read is a protocol violation, but an

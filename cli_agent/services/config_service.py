@@ -40,6 +40,8 @@ class ClientConfig:
     def validated(self) -> "ClientConfig":
         if not isinstance(self.base_url, str) or not self.base_url.strip():
             raise ConfigurationError("base_url must be a non-empty string")
+        if not self.base_url.strip().lower().startswith(("http://", "https://")):
+            raise ConfigurationError("base_url must start with http:// or https://")
         if not (MIN_INTERVAL <= int(self.interval_seconds) <= MAX_INTERVAL):
             raise ConfigurationError(
                 f"interval_seconds must be between {MIN_INTERVAL} and {MAX_INTERVAL}"
@@ -78,15 +80,21 @@ class ConfigService:
         except OSError:  # pragma: no cover - platform dependent
             pass
         payload = json.dumps(asdict(config), indent=2, sort_keys=True)
-        descriptor, temp_name = tempfile.mkstemp(
-            dir=str(self.path.parent), prefix=".config-", suffix=".tmp"
-        )
+        temp_name = ""
         try:
+            descriptor, temp_name = tempfile.mkstemp(
+                dir=str(self.path.parent), prefix=".config-", suffix=".tmp"
+            )
             with os.fdopen(descriptor, "w", encoding="utf-8") as handle:
                 handle.write(payload)
             os.replace(temp_name, self.path)
+            try:
+                os.chmod(self.path, 0o600)
+            except OSError:  # pragma: no cover - platform dependent
+                pass
         except OSError as exc:
-            Path(temp_name).unlink(missing_ok=True)
+            if temp_name:
+                Path(temp_name).unlink(missing_ok=True)
             raise ConfigurationError(f"cannot write config: {exc}") from exc
         return config
 

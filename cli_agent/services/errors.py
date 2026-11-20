@@ -44,6 +44,8 @@ class ApiError(ForensIQError):
         self.message = message
         self.detail = detail
         self.payload = payload
+        # Populated for 429/503 responses that carry a Retry-After header.
+        self.retry_after: float | None = None
 
 
 class UnauthorizedError(ApiError):
@@ -64,6 +66,10 @@ class RateLimitError(ApiError):
 
 class ServerError(ApiError):
     """HTTP 5xx - the backend failed."""
+
+
+class StatePersistenceError(ForensIQError):
+    """A durable checkpoint or queue write failed."""
 
 
 class TransportError(ForensIQError):

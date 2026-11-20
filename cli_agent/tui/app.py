@@ -704,11 +704,17 @@ class ForensIQApp(App):
                 f"backend      {st.backend.label}",
                 f"sources      {escape(self._source_label())}",
                 f"cycles       {st.cycles} ({st.submitted} submitted, {st.empty_cycles} empty)",
+                f"batches      {st.batches_submitted} sent, {st.pending_batches} pending",
                 f"failures     {st.failures}",
                 f"last success {self._fmt_time(st.last_success_at)}",
                 f"last error   {escape(st.last_error[:40]) if st.last_error else '-'}",
             ]
         elif self.view == "monitoring":
+            pending = (
+                f"{st.pending_batches} batch(es), {st.pending_entries} event(s)"
+                if st.pending_batches
+                else "none"
+            )
             lines += [
                 f"submission   {escape(self._submission_label())}",
                 f"sources      {escape(self._source_label())}",
@@ -716,7 +722,9 @@ class ForensIQApp(App):
                 f"empty        {st.empty_cycles}",
                 f"failures     {st.failures}",
                 f"last cycle   {st.last_cycle_entries} event(s)",
-                f"truncated    {st.truncated_cycles} cycle(s), {st.last_truncated_chars} chars",
+                f"pending      {escape(pending)}",
+                f"session stop {escape(st.session_close)}",
+                f"oversized    {st.oversized_batches} batch(es) cut mid-event",
                 f"last error   {escape(st.last_error[:40]) if st.last_error else '-'}",
             ]
         elif self.view == "analysis":

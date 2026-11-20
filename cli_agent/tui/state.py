@@ -95,6 +95,13 @@ class AppState:
     last_success_at: datetime | None = None
     last_error: str | None = None
     last_summary: str | None = None
+    # Phase 7 delivery state.
+    batches_submitted: int = 0
+    pending_batches: int = 0
+    pending_entries: int = 0
+    pending_bytes: int = 0
+    oversized_batches: int = 0
+    session_close: str = "not-created"
 
     latest_analysis: AnalysisView | None = None
     analysis_status: str = "empty"  # empty | loaded | unavailable
@@ -144,6 +151,12 @@ class AppState:
         self.last_summary = stats.last_summary
         self.truncated_cycles = stats.truncated_cycles
         self.last_truncated_chars = stats.last_truncated_chars
+        self.batches_submitted = stats.batches_submitted
+        self.pending_batches = stats.batches_pending
+        self.pending_entries = stats.pending_entries
+        self.pending_bytes = stats.pending_bytes
+        self.oversized_batches = stats.oversized_batches
+        self.session_close = stats.session_close
 
     def record_cycle(self, record: CycleRecord) -> None:
         self.cycle_log.append(record)
@@ -171,6 +184,12 @@ class AppState:
         self.last_success_at = None
         self.last_error = None
         self.last_summary = None
+        self.batches_submitted = 0
+        self.pending_batches = 0
+        self.pending_entries = 0
+        self.pending_bytes = 0
+        self.oversized_batches = 0
+        self.session_close = "not-created"
         self.sessions = []
         self.sessions_status = "unknown"
         self.sessions_error = None

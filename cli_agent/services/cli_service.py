@@ -23,6 +23,7 @@ from .config_service import ClientConfig, ConfigService
 from .errors import ConfigurationError, ForensIQError
 from .limits import MAX_LOG_CHARS
 from .monitoring_service import MonitoringService, MonitoringState
+from .outbox import Outbox
 from .response_adapter import AnalysisView, adapt_analysis
 
 ANALYZE_ENDPOINT = "/api/v1/analyze"
@@ -45,9 +46,20 @@ class CliService:
         transport: Transport | None = None,
         collector: CollectorService | None = None,
         config: ClientConfig | None = None,
+        outbox: Outbox | None = None,
     ) -> None:
         self.config_service = config_service or ConfigService()
-        self.config = config or self.config_service.load()
+        self.config_error: str | None = None
+        if config is not None:
+            self.config = config
+        else:
+            # A corrupt config must not prevent the app from starting; surface
+            # the problem instead of silently rewriting the user's file.
+            try:
+                self.config = self.config_service.load()
+            except ConfigurationError as exc:
+                self.config = ClientConfig()
+                self.config_error = str(exc)
         self.auth = AuthService(store=token_store or TokenStore())
         self.api = ApiClient(
             self.config.base_url,
@@ -60,6 +72,16 @@ class CliService:
         self.collector = collector or CollectorService(
             state_path=DEFAULT_COLLECTOR_STATE_PATH
         )
+        # The pending-delivery journal shares the collector's state directory.
+        # Tests that pass a collector without persistence stay file-free.
+        if outbox is None:
+            state_path = self.collector.state_path
+            outbox = (
+                Outbox(state_path.with_name("pending_delivery.json"))
+                if state_path is not None
+                else None
+            )
+        self.outbox = outbox
         self._monitoring: MonitoringService | None = None
 
     # -- session ---------------------------------------------------------
@@ -67,6 +89,8 @@ class CliService:
         return self.auth.load_session()
 
     async def login(self, username: str, password: str, *, base_url: str | None = None) -> Session:
+        if self._monitoring_active():
+            raise ConfigurationError("stop monitoring before signing in")
         if base_url and base_url.rstrip("/") != self.config.base_url:
             self.config = self.config_service.update(base_url=base_url.rstrip("/"))
             self.api.base_url = self.config.base_url
@@ -184,9 +208,29 @@ class CliService:
 
     # -- monitoring ------------------------------------------------------
     def configure_monitoring(self, **changes: Any) -> ClientConfig:
-        self.config = self.config_service.update(**changes)
-        self.api.base_url = self.config.base_url
-        return self.config
+        """Validate and persist configuration, refusing unsafe live changes.
+
+        The polling loop snapshots its endpoint, interval and sources at start.
+        Changing them mid-session would silently desynchronise the backend
+        session from the client, so a controlled stop is required.
+        """
+        if self._monitoring_active():
+            raise ConfigurationError(
+                "stop monitoring before changing configuration"
+            )
+        updated = self.config_service.update(**changes)
+        self.config = updated
+        self.config_error = None
+        self.api.base_url = updated.base_url
+        return updated
+
+    def _monitoring_active(self) -> bool:
+        monitoring = self._monitoring
+        return monitoring is not None and monitoring.state in (
+            MonitoringState.STARTING,
+            MonitoringState.RUNNING,
+            MonitoringState.STOPPING,
+        )
 
     def available_sources(self) -> list[dict[str, Any]]:
         return self.collector.available_sources()
@@ -200,6 +244,7 @@ class CliService:
             api_client=self.api,
             auth=self.auth,
             config=self.config,
+            outbox=self.outbox,
             **callbacks,
         )
 
@@ -248,12 +293,16 @@ class CliService:
                     "submitted": monitoring.stats.submitted,
                     "failures": monitoring.stats.failures,
                     "session_id": monitoring.stats.session_id,
+                    "session_close": monitoring.stats.session_close,
+                    "pending_batches": monitoring.stats.batches_pending,
+                    "pending_bytes": monitoring.stats.pending_bytes,
                     "last_error": monitoring.stats.last_error,
                 }
                 if monitoring is not None
                 else None
             ),
             "config": asdict(self.config),
+            "config_error": self.config_error,
         }
 
     # -- lifecycle -------------------------------------------------------

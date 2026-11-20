@@ -11,8 +11,9 @@ design -- see the Phase 1 report):
 * Windows collection performs a single ``ReadEventLog`` pass filtered by
   timestamp; there is no record-number bookmark, so overlapping windows can
   emit duplicates;
-* file offsets live in an in-memory dict and are lost on restart;
-* there is no inode/rotation tracking for the file sources;
+* file offsets live in an in-memory dict in the legacy extractor; this adapter
+  persists them selectively (see ``collect(persist=...)``) and tracks file
+  identity so rotation/truncation cannot silently skip data;
 * the legacy per-source ``try/except`` logs failures to a logger, so this
   adapter can only report a source as empty rather than failed.
 """
@@ -22,12 +23,13 @@ from __future__ import annotations
 import json
 import os
 import tempfile
+import threading
 from dataclasses import dataclass, field
 from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any, Callable
 
-from .errors import ConfigurationError, ForensIQError
+from .errors import ConfigurationError, ForensIQError, StatePersistenceError
 
 DEFAULT_TIME_RANGE_MINUTES = 5
 # Byte offsets are the only collector state worth surviving a restart; they live
@@ -76,12 +78,20 @@ class CollectorService:
         self._state_path = Path(state_path).expanduser() if state_path is not None else None
         self._restored = False
         self.rotation_resets: list[str] = []
+        # File identity captured with the saved offsets: {"dev", "ino", "size"}.
+        self._file_meta: dict[str, dict[str, int]] = {}
+        self._lock = threading.RLock()
+        self.state_corrupt = False
 
     @property
     def extractor(self) -> Any:
         if self._extractor is None:
             self._extractor = self._factory()
         return self._extractor
+
+    @property
+    def state_path(self) -> Path | None:
+        return self._state_path
 
     def available_sources(self) -> list[dict[str, Any]]:
         try:
@@ -112,7 +122,17 @@ class CollectorService:
         self,
         sources: list[str] | tuple[str, ...] | None = None,
         time_range_minutes: int = DEFAULT_TIME_RANGE_MINUTES,
+        *,
+        persist: bool = True,
     ) -> CollectionResult:
+        """Read new events from the selected sources.
+
+        ``persist=False`` is used by the monitoring loop: it advances the
+        in-memory offsets but leaves the durable checkpoint untouched until the
+        collected events have been acknowledged by the backend
+        (:meth:`commit_state`).  One-shot CLI collection keeps the Phase 5
+        behaviour and persists immediately.
+        """
         selected = self.validate_sources(sources)
         errors: dict[str, str] = {}
         self._restore_offsets()
@@ -122,7 +142,8 @@ class CollectorService:
         except Exception as exc:
             raise ForensIQError(f"log collection failed: {exc}") from exc
         finally:
-            self._persist_offsets()
+            if persist:
+                self._persist_offsets()
 
         entries: dict[str, list[dict[str, Any]]] = {}
         for source_id in selected:
@@ -158,7 +179,16 @@ class CollectorService:
         return raw if isinstance(raw, dict) else None
 
     def _restore_offsets(self) -> None:
-        """Reload persisted read positions once, so a restart does not replay."""
+        """Reload persisted read positions once, so a restart does not replay.
+
+        Supports the Phase 5 flat mapping and the Phase 7 document:
+
+            {"offsets": {path: position}, "_files": {path: {...}}, "version": 2}
+
+        A corrupt checkpoint is preserved beside the original
+        (``<name>.corrupt-<ts>``) and treated as "start from zero"; replaying
+        logs is safe, skipping them is not.
+        """
         if self._restored:
             return
         self._restored = True
@@ -168,15 +198,54 @@ class CollectorService:
         try:
             raw = json.loads(self._state_path.read_text(encoding="utf-8"))
         except (OSError, ValueError):
+            if self._state_path.exists():
+                self.state_corrupt = True
+                self._quarantine_state()
             return
         if not isinstance(raw, dict):
+            self.state_corrupt = True
+            self._quarantine_state()
             return
-        for path, position in raw.items():
+
+        stored_offsets = raw.get("offsets") if isinstance(raw.get("offsets"), dict) else raw
+        for path, position in stored_offsets.items():
+            if path == "_files" or path == "version":
+                continue
             if isinstance(path, str) and isinstance(position, int) and position >= 0:
                 offsets.setdefault(path, position)
 
+        files = raw.get("_files")
+        if isinstance(files, dict):
+            for path, meta in files.items():
+                if not isinstance(path, str) or not isinstance(meta, dict):
+                    continue
+                clean: dict[str, int] = {}
+                for key in ("dev", "ino", "size"):
+                    value = meta.get(key)
+                    if isinstance(value, int) and value >= 0:
+                        clean[key] = value
+                if clean:
+                    self._file_meta[path] = clean
+
+    def _signature(self, path: str) -> dict[str, int] | None:
+        try:
+            stat = os.stat(path)
+        except OSError:
+            return None
+        return {
+            "dev": int(getattr(stat, "st_dev", 0) or 0),
+            "ino": int(getattr(stat, "st_ino", 0) or 0),
+            "size": int(stat.st_size),
+        }
+
     def _reset_rotated_offsets(self) -> list[str]:
-        """Detect truncation/rotation: a stored offset past EOF would stall reads."""
+        """Reset stored positions when the file they refer to was replaced.
+
+        Phase 5 only compared the size, which misses a same-path replacement
+        whose new file is already larger than the old offset.  The inode/device
+        pair catches that; on Windows, where ``st_ino`` may be zero, the size
+        check remains the fallback.
+        """
         offsets = self._offsets()
         if offsets is None:
             return []
@@ -184,30 +253,117 @@ class CollectorService:
         for path, position in list(offsets.items()):
             if not isinstance(position, int) or position <= 0:
                 continue
-            try:
-                size = os.path.getsize(path)
-            except OSError:
+            current = self._signature(path)
+            if current is None:
                 continue
-            if size < position:
+            stored = self._file_meta.get(path)
+            replaced = False
+            if stored:
+                stored_ino = stored.get("ino", 0)
+                stored_dev = stored.get("dev", 0)
+                if stored_ino and current.get("ino") and stored_ino != current.get("ino"):
+                    replaced = True
+                elif stored_dev and current.get("dev") and stored_dev != current.get("dev"):
+                    replaced = True
+            if replaced or current.get("size", 0) < position:
                 offsets[path] = 0
                 resets.append(path)
         return resets
 
-    def _persist_offsets(self) -> None:
-        """Atomically store read positions; never let this break collection."""
-        offsets = self._offsets()
-        if offsets is None or self._state_path is None:
+    def snapshot_state(self) -> tuple[dict[str, int], dict[str, dict[str, int]]]:
+        """Offsets and file identity as of the last collection (not yet saved)."""
+        offsets = self._offsets() or {}
+        clean_offsets = {
+            str(path): int(position)
+            for path, position in offsets.items()
+            if isinstance(position, int) and position >= 0
+        }
+        files = {
+            path: signature
+            for path in clean_offsets
+            if (signature := self._signature(path)) is not None
+        }
+        return clean_offsets, files
+
+    def commit_state(
+        self, offsets: dict[str, int], files: dict[str, dict[str, int]] | None = None
+    ) -> None:
+        """Persist an acknowledged checkpoint (raises on failure)."""
+        with self._lock:
+            effective_files = files if files is not None else {}
+            if effective_files:
+                self._file_meta.update(effective_files)
+            self._persist_offsets(offsets=offsets, strict=True)
+
+    def checkpoint(self) -> None:
+        """Persist the current offsets, raising if that is impossible."""
+        offsets, files = self.snapshot_state()
+        self.commit_state(offsets, files)
+
+    def _persist_offsets(self, *, offsets: dict[str, int] | None = None, strict: bool = False) -> None:
+        """Atomically store read positions and file identity.
+
+        ``strict`` is used for acknowledged checkpoints: a failed write must be
+        surfaced so the caller does not treat data as safely committed.  The
+        legacy one-shot path stays best-effort.
+        """
+        source = offsets if offsets is not None else self._offsets()
+        if source is None or self._state_path is None:
             return
-        payload = {str(path): int(position) for path, position in offsets.items() if isinstance(position, int)}
+        clean = {
+            str(path): int(position)
+            for path, position in source.items()
+            if isinstance(position, int) and position >= 0
+        }
+        files = {
+            path: meta
+            for path in clean
+            if (meta := (self._file_meta.get(path) or self._signature(path))) is not None
+        }
+        self._file_meta.update(files)
+        # Flat offsets keep the Phase 5 reader working; "_files"/"version" are
+        # ignored by that reader and understood by this one.
+        payload = {**clean, "_files": files, "version": 2}
         try:
             self._state_path.parent.mkdir(parents=True, exist_ok=True)
+            try:
+                os.chmod(self._state_path.parent, 0o700)
+            except OSError:  # pragma: no cover - platform dependent
+                pass
             descriptor, temp_name = tempfile.mkstemp(
                 dir=str(self._state_path.parent), prefix=".collector-", suffix=".tmp"
             )
-            with os.fdopen(descriptor, "w", encoding="utf-8") as handle:
-                json.dump(payload, handle, indent=2, sort_keys=True)
-            os.replace(temp_name, self._state_path)
-        except OSError:  # pragma: no cover - persistence is best effort
+            try:
+                os.chmod(temp_name, 0o600)
+                with os.fdopen(descriptor, "w", encoding="utf-8") as handle:
+                    json.dump(payload, handle, indent=2, sort_keys=True)
+                    handle.flush()
+                    os.fsync(handle.fileno())
+                os.replace(temp_name, self._state_path)
+                try:
+                    os.chmod(self._state_path, 0o600)
+                except OSError:  # pragma: no cover
+                    pass
+            except BaseException:
+                Path(temp_name).unlink(missing_ok=True)
+                raise
+        except OSError as exc:
+            if strict:
+                raise StatePersistenceError(
+                    f"cannot persist collector checkpoint: {type(exc).__name__}"
+                ) from exc
+            # Legacy best-effort path: collection itself must keep working.
+
+    def _quarantine_state(self) -> None:
+        """Preserve an unreadable checkpoint instead of deleting it."""
+        if self._state_path is None:
+            return
+        target = self._state_path.with_name(
+            self._state_path.name + f".corrupt-{int(datetime.now().timestamp())}"
+        )
+        try:
+            os.replace(self._state_path, target)
+        except OSError:  # pragma: no cover
             pass
 
     # -- internals -------------------------------------------------------
