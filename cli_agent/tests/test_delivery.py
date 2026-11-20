@@ -40,12 +40,21 @@ def make_monitoring(
     collector: CollectorService | None = None,
     outbox: Outbox | None = None,
     retry_attempts: int = 3,
+    max_batch_chars: int = 50_000,
+    batch_delay_seconds: float = 0.0,
+    filter_noise: bool = False,
 ) -> MonitoringService:
     auth = make_auth(tmp_path)
     client = ApiClient(BASE, transport=transport, token_provider=lambda: auth.token, sleep=_no_sleep)
     auth.bind_client(client)
     collector = collector or CollectorService(extractor=FakeExtractor(batches=batches))
-    config = ClientConfig(interval_seconds=10, sources=("auth_logs",))
+    config = ClientConfig(
+        interval_seconds=10,
+        sources=("auth_logs",),
+        max_batch_chars=max_batch_chars,
+        batch_delay_seconds=batch_delay_seconds,
+        filter_noise=filter_noise,
+    )
     return MonitoringService(
         collector,
         client,

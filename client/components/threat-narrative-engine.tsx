@@ -9,6 +9,8 @@ import {
   Play, Pause, RotateCcw, FastForward
 } from 'lucide-react';
 
+import type { InvestigationResult, VisualizationMetrics } from '@/lib/types';
+
 interface ThreatStoryData {
   summary: string;
   matched_techniques: Array<{
@@ -20,6 +22,8 @@ interface ThreatStoryData {
     relevance_score: number;
   }>;
   enhanced_analysis?: string | null;
+  investigation?: InvestigationResult | null;
+  visualization_metrics?: VisualizationMetrics | null;
   analysis_timestamp: string;
   processing_time_ms: number;
 }
@@ -103,13 +107,29 @@ const ThreatNarrativeEngine: React.FC<{ data: ThreatStoryData }> = ({ data }) =>
       return (ai === -1 ? 99 : ai) - (bi === -1 ? 99 : bi);
     });
 
+    const threatLevel = (
+      data.investigation?.overall_threat_level ||
+      data.visualization_metrics?.overall_threat_level ||
+      ''
+    ).toLowerCase();
+    const journeyRiskByPhase: Record<string, StoryChapter['severity']> = {};
+    for (const item of data.visualization_metrics?.attack_journey || []) {
+      const key = (item.phase_key || item.phase || '').toLowerCase().replace(/\s+/g, '-');
+      if (key && (item.risk_level === 'low' || item.risk_level === 'medium' || item.risk_level === 'high' || item.risk_level === 'critical')) {
+        journeyRiskByPhase[key] = item.risk_level;
+      }
+    }
+
     for (const phase of detectedPhases) {
       const techs = phaseMap[phase];
       const meta = PHASE_META[phase] ?? { label: phase.replace(/-/g, ' ').toUpperCase(), icon: Activity, severity: 'medium' as const };
+      const calibratedSeverity: StoryChapter['severity'] =
+        journeyRiskByPhase[phase] ||
+        (threatLevel === 'informational' || threatLevel === 'low' ? 'low' : meta.severity);
 
       // Build a list of the techniques in this phase with real data
       const techniquesSummary = techs
-        .map(t => `### ${t.technique_id}: ${t.name}\n> Relevance Score: **${(t.relevance_score * 100).toFixed(1)}%**\n\n${t.description}`)
+        .map(t => `### ${t.technique_id}: ${t.name}\n> Vector Similarity: **${(t.relevance_score * 100).toFixed(1)}%**\n\n${t.description}`)
         .join('\n\n---\n\n');
 
       chapters.push({
@@ -117,7 +137,7 @@ const ThreatNarrativeEngine: React.FC<{ data: ThreatStoryData }> = ({ data }) =>
         title: meta.label,
         icon: meta.icon,
         content: `${techs.length} technique(s) detected in this phase`,
-        severity: meta.severity,
+        severity: calibratedSeverity,
         techniques: techs.map(t => ({
           id: t.technique_id,
           name: t.name,
@@ -144,15 +164,47 @@ const ThreatNarrativeEngine: React.FC<{ data: ThreatStoryData }> = ({ data }) =>
     return chapters;
   }, [data]);
 
-  // Threat actor profile from real data
+  // Threat actor profile calibrated to investigation verdict + visualization metrics
   const threatActorProfile: ThreatActor = useMemo(() => {
     const count = data.matched_techniques.length;
-    if (count === 0) return { name: 'Unknown Actor', sophistication: 0, motivation: 'Unknown', tactics: [] };
-    const avg = data.matched_techniques.reduce((s, t) => s + t.relevance_score, 0) / count;
     const uniquePhases = [...new Set(data.matched_techniques.flatMap(t => t.kill_chain_phases))];
+    const threatLevel = (
+      data.investigation?.overall_threat_level ||
+      data.visualization_metrics?.overall_threat_level ||
+      ''
+    ).toLowerCase();
+    const calibratedRisk = data.visualization_metrics?.overall_risk_score;
+
+    if (count === 0) {
+      return { name: 'No Confirmed Adversary', sophistication: 0, motivation: 'None Observed', tactics: [] };
+    }
+    if (threatLevel === 'informational') {
+      return {
+        name: 'No Confirmed Adversary (Informational)',
+        sophistication: calibratedRisk ?? 15,
+        motivation: 'Routine / Unconfirmed Activity',
+        tactics: uniquePhases,
+      };
+    }
+    if (threatLevel === 'low') {
+      return {
+        name: 'Low-Confidence / Opportunistic Activity',
+        sophistication: calibratedRisk ?? 30,
+        motivation: uniquePhases.includes('discovery') ? 'Reconnaissance / Probing' : 'Unconfirmed Activity',
+        tactics: uniquePhases,
+      };
+    }
+
+    const avg = data.matched_techniques.reduce((s, t) => s + t.relevance_score, 0) / count;
+    const sophistication = calibratedRisk ?? Math.round(avg * 100);
     return {
-      name: avg > 0.7 ? 'Advanced Persistent Threat' : avg > 0.5 ? 'Skilled Adversary' : 'Opportunistic Attacker',
-      sophistication: Math.round(avg * 100),
+      name:
+        threatLevel === 'critical' || sophistication >= 80
+          ? 'Advanced Persistent Threat'
+          : threatLevel === 'high' || sophistication >= 60
+          ? 'Skilled Adversary'
+          : 'Opportunistic Attacker',
+      sophistication,
       motivation: uniquePhases.includes('exfiltration') ? 'Data Exfiltration'
         : uniquePhases.includes('persistence') ? 'Long-term Access'
         : uniquePhases.includes('impact') ? 'Destructive Attack'

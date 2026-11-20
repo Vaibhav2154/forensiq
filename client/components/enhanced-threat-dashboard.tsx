@@ -354,7 +354,7 @@ const EnhancedThreatDashboard: React.FC<{ analysisData: EnhancedAnalysisData }> 
 
                 <div className="relative">
                   <div className="absolute left-6 top-0 bottom-0 w-0.5 bg-gradient-to-b from-green-500 via-yellow-500 to-purple-500" />
-                  {attackPathNodes.map((node: any, idx: number) => (
+                  {attackPathNodes.slice(0, 25).map((node: any, idx: number) => (
                     <div key={node.node_id || idx} className="relative mb-6 last:mb-0 pl-16">
                       <div className={`absolute left-2 w-8 h-8 rounded-full border-2 flex items-center justify-center text-xs font-bold ${getStatusBadgeColor(node.status)}`}>
                         {idx + 1}
@@ -392,6 +392,11 @@ const EnhancedThreatDashboard: React.FC<{ analysisData: EnhancedAnalysisData }> 
                       </div>
                     </div>
                   ))}
+                  {attackPathNodes.length > 25 && (
+                    <div className="pl-16 pt-2 text-xs text-gray-400">
+                      Showing first 25 of {attackPathNodes.length} attack-path nodes.
+                    </div>
+                  )}
                 </div>
 
                 {((attackPath?.missing_evidence && attackPath.missing_evidence.length > 0) ||

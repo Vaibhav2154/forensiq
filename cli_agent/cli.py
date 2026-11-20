@@ -21,6 +21,7 @@ from typing import Sequence
 
 from . import __version__
 from .services.cli_service import CliService
+from .services.config_service import DEFAULT_AI_BATCH_CHARS, DEFAULT_BATCH_DELAY
 from .services.errors import ForensIQError
 from .services.monitoring_service import MonitoringState
 
@@ -56,11 +57,45 @@ def build_parser() -> argparse.ArgumentParser:
     setup.add_argument("--interval", type=int, default=300)
     setup.add_argument("--max-results", type=int, default=5)
     setup.add_argument("--no-enhance", action="store_true")
+    setup.add_argument(
+        "--max-batch-chars",
+        type=int,
+        default=DEFAULT_AI_BATCH_CHARS,
+        help=f"max characters per batch sent to backend (1000-50000, default {DEFAULT_AI_BATCH_CHARS})",
+    )
+    setup.add_argument(
+        "--batch-delay",
+        type=float,
+        default=DEFAULT_BATCH_DELAY,
+        help=f"seconds to wait between split batches (0-60, default {DEFAULT_BATCH_DELAY:g})",
+    )
+    setup.add_argument(
+        "--no-noise-filter",
+        action="store_true",
+        help="disable client-side benign log noise filtering and deduplication",
+    )
     dynamic = profile_sub.add_parser("setup-dynamic", help="configure system-log monitoring")
     dynamic.add_argument("--sources", nargs="*")
     dynamic.add_argument("--interval", type=int, default=300)
     dynamic.add_argument("--max-results", type=int, default=5)
     dynamic.add_argument("--no-enhance", action="store_true")
+    dynamic.add_argument(
+        "--max-batch-chars",
+        type=int,
+        default=DEFAULT_AI_BATCH_CHARS,
+        help=f"max characters per batch sent to backend (1000-50000, default {DEFAULT_AI_BATCH_CHARS})",
+    )
+    dynamic.add_argument(
+        "--batch-delay",
+        type=float,
+        default=DEFAULT_BATCH_DELAY,
+        help=f"seconds to wait between split batches (0-60, default {DEFAULT_BATCH_DELAY:g})",
+    )
+    dynamic.add_argument(
+        "--no-noise-filter",
+        action="store_true",
+        help="disable client-side benign log noise filtering and deduplication",
+    )
     dynamic.add_argument("--list-sources", action="store_true")
     profile_sub.add_parser("status", help="show the stored profile")
 
@@ -70,6 +105,24 @@ def build_parser() -> argparse.ArgumentParser:
     mode.add_argument("--start", action="store_true", help="tail the configured log file")
     monitor.add_argument("--sources", nargs="*")
     monitor.add_argument("--interval", type=int)
+    monitor.add_argument(
+        "--max-batch-chars",
+        type=int,
+        default=None,
+        help="override max characters per batch (1000-50000)",
+    )
+    monitor.add_argument(
+        "--batch-delay",
+        type=float,
+        default=None,
+        help="override seconds to wait between split batches (0-60)",
+    )
+    monitor.add_argument(
+        "--no-noise-filter",
+        action="store_true",
+        default=False,
+        help="disable client-side benign log noise filtering for this profile",
+    )
 
     analyze = sub.add_parser("analyze", help="analyse a log file once")
     analyze.add_argument("--file", required=True)
@@ -180,8 +233,15 @@ def _handle_profile(service: CliService, args: argparse.Namespace) -> int:
             interval_seconds=args.interval,
             max_results=args.max_results,
             enhance_with_ai=not args.no_enhance,
+            max_batch_chars=args.max_batch_chars,
+            batch_delay_seconds=args.batch_delay,
+            filter_noise=not args.no_noise_filter,
         )
-        print(f"configured file monitoring for {config.log_path} every {config.interval_seconds}s")
+        print(
+            f"configured file monitoring for {config.log_path} every {config.interval_seconds}s "
+            f"(batch<={config.max_batch_chars} chars, delay={config.batch_delay_seconds:g}s, "
+            f"noise_filter={'on' if config.filter_noise else 'off'})"
+        )
         return 0
     if args.profile_command == "setup-dynamic":
         if args.list_sources:
@@ -194,9 +254,16 @@ def _handle_profile(service: CliService, args: argparse.Namespace) -> int:
             interval_seconds=args.interval,
             max_results=args.max_results,
             enhance_with_ai=not args.no_enhance,
+            max_batch_chars=args.max_batch_chars,
+            batch_delay_seconds=args.batch_delay,
+            filter_noise=not args.no_noise_filter,
         )
         sources = ", ".join(config.sources) or "all available"
-        print(f"configured dynamic monitoring ({sources}) every {config.interval_seconds}s")
+        print(
+            f"configured dynamic monitoring ({sources}) every {config.interval_seconds}s "
+            f"(batch<={config.max_batch_chars} chars, delay={config.batch_delay_seconds:g}s, "
+            f"noise_filter={'on' if config.filter_noise else 'off'})"
+        )
         return 0
     if args.profile_command == "status":
         status = service.status()
@@ -214,10 +281,17 @@ async def _handle_monitor(service: CliService, args: argparse.Namespace) -> int:
     if service.restore_session() is None:
         print("error: not logged in; run 'forensiq auth login'", file=sys.stderr)
         return 1
-    service.configure_monitoring(
-        monitoring_type="dynamic" if args.dynamic else "file",
-        sources=tuple(args.sources or ()),
-    )
+    monitor_changes: dict[str, object] = {
+        "monitoring_type": "dynamic" if args.dynamic else "file",
+        "sources": tuple(args.sources or ()),
+    }
+    if args.max_batch_chars is not None:
+        monitor_changes["max_batch_chars"] = args.max_batch_chars
+    if args.batch_delay is not None:
+        monitor_changes["batch_delay_seconds"] = args.batch_delay
+    if args.no_noise_filter:
+        monitor_changes["filter_noise"] = False
+    service.configure_monitoring(**monitor_changes)
     monitoring = await service.start_monitoring(
         interval=args.interval,
         on_state_change=lambda state: print(f"monitoring: {state.value}"),

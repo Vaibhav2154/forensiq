@@ -253,3 +253,58 @@ def test_latest_endpoint_handles_dict_history_items(monkeypatch) -> None:
     assert body["analysis"]["visualization_metrics"]["overall_risk_score"] == 0
     assert body["analysis"]["visualization_metrics"]["summary_counts"]["analysis_time_sec"] == 2.5
 
+
+def test_informational_and_low_verdicts_do_not_inflate_risk_from_vector_similarity() -> None:
+    techniques = [
+        {
+            "technique_id": "T1622",
+            "name": "Debugger Evasion",
+            "description": "Evasion check.",
+            "kill_chain_phases": ["defense-evasion", "discovery"],
+            "platforms": ["Linux"],
+            "relevance_score": 0.85,
+        },
+        {
+            "technique_id": "T1053.002",
+            "name": "At",
+            "description": "Scheduled job.",
+            "kill_chain_phases": ["execution", "persistence", "privilege-escalation"],
+            "platforms": ["Linux"],
+            "relevance_score": 0.84,
+        },
+    ]
+
+    info_inv = {
+        "overall_threat_level": "informational",
+        "overall_confidence": "medium",
+        "findings": [{"finding_id": "f1", "title": "Routine system logs"}],
+        "attack_path": {
+            "nodes": [
+                {
+                    "node_id": f"n{i}",
+                    "label": f"Event {i}",
+                    "stage": "observation",  # non-canonical stage should not inflate attack_phases
+                    "status": "observed",
+                    "confidence": "medium",
+                }
+                for i in range(50)
+            ]
+        },
+    }
+    info_metrics = compute_visualization_metrics(techniques, info_inv, processing_time_ms=1000.0)
+    assert info_metrics["overall_threat_level"] == "informational"
+    assert info_metrics["overall_risk_score"] <= 20
+    assert all(item["value"] <= 30 for item in info_metrics["sophistication_radar"])
+    assert info_metrics["summary_counts"]["attack_phases"] == 5
+    assert len(info_metrics["attack_progression"]) == 25
+
+    low_inv = {
+        "overall_threat_level": "low",
+        "overall_confidence": "high",
+        "findings": [{"finding_id": "f1", "title": "Single failed login"}],
+    }
+    low_metrics = compute_visualization_metrics(techniques, low_inv, processing_time_ms=1000.0)
+    assert low_metrics["overall_threat_level"] == "low"
+    assert 15 <= low_metrics["overall_risk_score"] <= 39
+    assert all(item["value"] <= 45 for item in low_metrics["sophistication_radar"])
+

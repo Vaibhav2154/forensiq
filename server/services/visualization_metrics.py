@@ -34,6 +34,19 @@ _THREAT_LEVEL_BASELINE: dict[str, int] = {
     "informational": 10,
 }
 
+# Calibrates raw vector-similarity scores (which are often 0.80+ even for
+# benign logs) so an investigation verdict of "informational" or "low" does
+# not render as 85% risk / 89% sophistication across the dashboard.
+_THREAT_LEVEL_SCALE: dict[str, float] = {
+    "critical": 1.0,
+    "high": 1.0,
+    "medium": 0.85,
+    "low": 0.45,
+    "informational": 0.25,
+}
+
+MAX_PROGRESSION_STEPS = 25
+
 _CONFIDENCE_WEIGHT: dict[str, float] = {
     "high": 0.85,
     "medium": 0.65,
@@ -178,29 +191,45 @@ def compute_visualization_metrics(
     uncertainty_and_gaps = [str(g) for g in (inv.get("uncertainty_and_gaps") or [])]
     guardrail_warnings = [str(w) for w in (inv.get("guardrail_warnings") or [])]
 
+    threat_scale = (
+        _THREAT_LEVEL_SCALE[overall_threat_level]
+        if raw_threat_level in _THREAT_LEVEL_BASELINE
+        else 1.0
+    )
+
     if raw_threat_level in _THREAT_LEVEL_BASELINE:
-        if overall_threat_level == "informational" and not techniques and not findings:
-            overall_risk_score = 0
-        elif overall_threat_level in ("critical", "high", "medium"):
-            overall_risk_score = _clamp_pct(
-                max(_THREAT_LEVEL_BASELINE[overall_threat_level], max_confidence_pct)
+        if overall_threat_level == "informational":
+            if not techniques and not findings:
+                overall_risk_score = 0
+            else:
+                overall_risk_score = min(20, _clamp_pct(max_confidence_pct * 0.2))
+        elif overall_threat_level == "low":
+            if techniques or findings:
+                overall_risk_score = min(39, max(15, _clamp_pct(max_confidence_pct * 0.4)))
+            else:
+                overall_risk_score = 15
+        elif overall_threat_level == "medium":
+            overall_risk_score = min(
+                74,
+                max(45, _clamp_pct((_THREAT_LEVEL_BASELINE["medium"] + max_confidence_pct) / 2.0)),
             )
         else:
+            # critical / high
             overall_risk_score = _clamp_pct(
                 max(_THREAT_LEVEL_BASELINE[overall_threat_level], max_confidence_pct)
-                if (techniques or findings)
-                else _THREAT_LEVEL_BASELINE[overall_threat_level]
             )
     else:
         overall_risk_score = max_confidence_pct
 
-    # Collect unique phases across techniques and attack-path nodes
+    # Collect unique canonical kill-chain phases across techniques and attack-path nodes
     unique_phases: set[str] = set()
     for t in techniques:
-        unique_phases.update(t["kill_chain_phases"])
+        for p in t["kill_chain_phases"]:
+            if p:
+                unique_phases.add(p)
     for node in attack_path_nodes:
         norm_stage = _normalize_phase(node.get("stage"))
-        if norm_stage:
+        if norm_stage in _PHASE_INDEX:
             unique_phases.add(norm_stage)
 
     def _phase_score(target_phases: list[str]) -> int:
@@ -215,11 +244,11 @@ def compute_visualization_metrics(
                 matched_scores.append(_confidence_to_pct(node.get("confidence"), node.get("status")) / 100.0)
         if not matched_scores:
             return 0
-        return _clamp_pct(max(matched_scores) * 100.0)
+        return _clamp_pct(max(matched_scores) * 100.0 * threat_scale)
 
     if techniques or findings:
         tech_complexity = _clamp_pct(
-            avg_confidence_pct * 0.7 + min(len(unique_phases), 5) * 6
+            (avg_confidence_pct * 0.7 + min(len(unique_phases), 5) * 6) * threat_scale
         )
     else:
         tech_complexity = 0
@@ -261,8 +290,8 @@ def compute_visualization_metrics(
     for idx, phase in enumerate(sorted_phases):
         bucket = phase_buckets[phase]
         scores = [t["relevance_score"] for t in bucket]
-        avg_s = sum(scores) / len(scores)
-        max_s = max(scores)
+        avg_s = (sum(scores) / len(scores)) * threat_scale
+        max_s = max(scores) * threat_scale
         phase_risk_distribution.append(
             {
                 "phase": phase.replace("-", " "),
@@ -302,15 +331,22 @@ def compute_visualization_metrics(
 
     attack_progression: list[dict[str, Any]] = []
     if attack_path_nodes:
-        for idx, node in enumerate(attack_path_nodes):
+        # Cap huge fallback attack paths to keep charts & tables readable.
+        sampled_nodes = (
+            attack_path_nodes[:MAX_PROGRESSION_STEPS]
+            if len(attack_path_nodes) > MAX_PROGRESSION_STEPS
+            else attack_path_nodes
+        )
+        for idx, node in enumerate(sampled_nodes):
             node_eids = [str(eid) for eid in (node.get("event_ids") or [])]
             matching_ts = next((event_ts_map[eid] for eid in node_eids if eid in event_ts_map), "")
+            raw_node_risk = _confidence_to_pct(node.get("confidence"), node.get("status"))
             attack_progression.append(
                 {
                     "step": idx + 1,
                     "technique": str(node.get("label") or f"Step {idx + 1}"),
                     "phase": str(node.get("stage") or "unknown"),
-                    "risk": _confidence_to_pct(node.get("confidence"), node.get("status")),
+                    "risk": _clamp_pct(raw_node_risk * threat_scale),
                     "status": str(node.get("status") or "inferred"),
                     "timestamp": matching_ts or f"Step {idx + 1}",
                     "knowledge_ids": [str(k) for k in (node.get("knowledge_source_ids") or [])],
@@ -324,14 +360,14 @@ def compute_visualization_metrics(
                 default=len(CANONICAL_KILL_CHAIN_ORDER),
             ),
         )
-        for idx, t in enumerate(ordered_techs):
+        for idx, t in enumerate(ordered_techs[:MAX_PROGRESSION_STEPS]):
             attack_progression.append(
                 {
                     "step": idx + 1,
                     "technique": t["name"],
                     "technique_id": t["technique_id"],
                     "phase": t["kill_chain_phases"][0] if t["kill_chain_phases"] else "unknown",
-                    "risk": _clamp_pct(t["relevance_score"] * 100.0),
+                    "risk": _clamp_pct(t["relevance_score"] * 100.0 * threat_scale),
                     "status": "inferred",
                     "timestamp": f"Step {idx + 1}",
                     "knowledge_ids": [t["technique_id"]] if t["technique_id"] else [],

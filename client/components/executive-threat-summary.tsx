@@ -47,12 +47,15 @@ const ExecutiveThreatSummary: React.FC<{ data: LogAnalysisResponse }> = ({ data 
     const uniquePhases = new Set(techniques.flatMap(t => t.kill_chain_phases || []));
 
     const overallRisk = vm?.overall_risk_score ?? Math.round(maxRisk * 100);
-    const confidencePct = vm?.avg_confidence_pct ?? Math.round(avgConfidence * 100);
+    const confidenceLabel = (investigation?.overall_confidence || vm?.overall_confidence_label || 'low').toUpperCase();
+    const confidencePct = investigation?.overall_confidence
+      ? (confidenceLabel === 'HIGH' ? 85 : confidenceLabel === 'MEDIUM' ? 65 : 35)
+      : (vm?.avg_confidence_pct ?? Math.round(avgConfidence * 100));
 
     return {
       overall_risk: overallRisk,
       confidence_level: confidencePct,
-      confidence_label: (investigation?.overall_confidence || vm?.overall_confidence_label || 'low').toUpperCase(),
+      confidence_label: confidenceLabel,
       threat_level_label: (investigation?.overall_threat_level || vm?.overall_threat_level || '').toUpperCase(),
       attack_phases: vm?.summary_counts?.attack_phases ?? uniquePhases.size,
       techniques_detected: vm?.summary_counts?.techniques_detected ?? count,
@@ -124,10 +127,11 @@ const ExecutiveThreatSummary: React.FC<{ data: LogAnalysisResponse }> = ({ data 
       return acc;
     }, {} as Record<string, number>);
 
+    const totalAssignments = Object.values(phaseCount).reduce((sum, n) => sum + n, 0) || 1;
     return Object.entries(phaseCount).map(([phase, count]) => ({
       phase: phase.replace(/-/g, ' ').toUpperCase(),
       count,
-      percentage: Math.round((count / techniques.length) * 100)
+      percentage: Math.round((count / totalAssignments) * 100)
     }));
   }, [data]);
 
@@ -138,12 +142,17 @@ const ExecutiveThreatSummary: React.FC<{ data: LogAnalysisResponse }> = ({ data 
     return 'text-green-400 bg-green-900/30 border-green-500';
   };
 
-  const getRiskLevel = (risk: number) => {
-    if (executiveMetrics.threat_level_label) return executiveMetrics.threat_level_label;
+  const getScoreLevel = (risk: number) => {
     if (risk >= 80) return 'CRITICAL';
     if (risk >= 60) return 'HIGH';
     if (risk >= 40) return 'MEDIUM';
-    return 'LOW';
+    if (risk >= 20) return 'LOW';
+    return 'INFORMATIONAL';
+  };
+
+  const getRiskLevel = (risk: number) => {
+    if (executiveMetrics.threat_level_label) return executiveMetrics.threat_level_label;
+    return getScoreLevel(risk);
   };
 
   const recommendationsList = useMemo(() => {
@@ -280,7 +289,7 @@ const ExecutiveThreatSummary: React.FC<{ data: LogAnalysisResponse }> = ({ data 
                   <div className="flex justify-between items-start mb-3 gap-2">
                     <h4 className="text-base font-semibold text-white">{impact.area}</h4>
                     <span className={`px-2 py-0.5 border text-xs font-medium ${getSeverityColor(impact.risk_level)}`}>
-                      {getRiskLevel(impact.risk_level)}
+                      {getScoreLevel(impact.risk_level)}
                     </span>
                   </div>
                   <div className="space-y-2 text-xs">

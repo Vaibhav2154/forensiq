@@ -58,7 +58,7 @@ from .errors import (
     StatePersistenceError,
     UnauthorizedError,
 )
-from .limits import split_logs_lossless
+from .limits import MAX_LOG_CHARS, filter_log_noise, split_logs_lossless
 from .outbox import (
     Outbox,
     OutboxError,
@@ -412,7 +412,11 @@ class MonitoringService:
                 )
             )
 
-        split = split_logs_lossless(result.formatted_text)
+        raw_text = result.formatted_text
+        if self._config.filter_noise:
+            raw_text, _dropped = filter_log_noise(raw_text)
+        batch_limit = min(int(self._config.max_batch_chars), MAX_LOG_CHARS)
+        split = split_logs_lossless(raw_text, limit=batch_limit)
         self._stats.split_batches = split.count
         self._stats.oversized_batches = split.oversized
         if split.count == 0:  # pragma: no cover - whitespace-only extractor output
@@ -565,6 +569,9 @@ class MonitoringService:
             self._publish_pending(delivery)
             if pending:
                 self._persist_pending(delivery)
+                delay = float(self._config.batch_delay_seconds)
+                if delay > 0 and not self._stop_event.is_set():
+                    await self._sleep(delay)
 
         # Every batch acknowledged: commit the checkpoint they cover, then let
         # the journal go.  Ordering favours no-loss (duplicates on a crash

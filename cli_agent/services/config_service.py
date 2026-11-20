@@ -23,6 +23,12 @@ MIN_INTERVAL = 10
 MAX_INTERVAL = 86_400
 MIN_MAX_RESULTS = 1
 MAX_MAX_RESULTS = 20
+MIN_BATCH_CHARS = 1_000
+MAX_BATCH_CHARS = 50_000
+DEFAULT_AI_BATCH_CHARS = 10_000
+MIN_BATCH_DELAY = 0.0
+MAX_BATCH_DELAY = 60.0
+DEFAULT_BATCH_DELAY = 2.0
 
 
 @dataclass(frozen=True)
@@ -36,6 +42,9 @@ class ClientConfig:
     monitoring_type: str = "dynamic"
     sources: tuple[str, ...] = ()
     log_path: str | None = None
+    max_batch_chars: int = DEFAULT_AI_BATCH_CHARS
+    batch_delay_seconds: float = DEFAULT_BATCH_DELAY
+    filter_noise: bool = True
 
     def validated(self) -> "ClientConfig":
         if not isinstance(self.base_url, str) or not self.base_url.strip():
@@ -49,6 +58,14 @@ class ClientConfig:
         if not (MIN_MAX_RESULTS <= int(self.max_results) <= MAX_MAX_RESULTS):
             raise ConfigurationError(
                 f"max_results must be between {MIN_MAX_RESULTS} and {MAX_MAX_RESULTS}"
+            )
+        if not (MIN_BATCH_CHARS <= int(self.max_batch_chars) <= MAX_BATCH_CHARS):
+            raise ConfigurationError(
+                f"max_batch_chars must be between {MIN_BATCH_CHARS} and {MAX_BATCH_CHARS}"
+            )
+        if not (MIN_BATCH_DELAY <= float(self.batch_delay_seconds) <= MAX_BATCH_DELAY):
+            raise ConfigurationError(
+                f"batch_delay_seconds must be between {MIN_BATCH_DELAY:g} and {MAX_BATCH_DELAY:g}"
             )
         if self.monitoring_type not in {"dynamic", "file"}:
             raise ConfigurationError("monitoring_type must be 'dynamic' or 'file'")
@@ -119,6 +136,11 @@ def _from_dict(raw: dict[str, Any]) -> ClientConfig:
             monitoring_type=str(raw.get("monitoring_type", defaults.monitoring_type)),
             sources=sources,
             log_path=raw.get("log_path"),
+            max_batch_chars=int(raw.get("max_batch_chars", defaults.max_batch_chars)),
+            batch_delay_seconds=float(
+                raw.get("batch_delay_seconds", defaults.batch_delay_seconds)
+            ),
+            filter_noise=bool(raw.get("filter_noise", defaults.filter_noise)),
         )
     except (TypeError, ValueError) as exc:
         raise ConfigurationError(f"invalid config value: {exc}") from exc

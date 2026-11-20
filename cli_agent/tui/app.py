@@ -261,9 +261,14 @@ class ForensIQApp(App):
                                 yield Input(placeholder="300", id="settings-interval")
                                 yield Label("max results (1-20)", classes="field-label")
                                 yield Input(placeholder="5", id="settings-max-results")
+                                yield Label("max batch chars (1000-50000)", classes="field-label")
+                                yield Input(placeholder="10000", id="settings-batch-chars")
+                                yield Label("batch delay (seconds, 0-60)", classes="field-label")
+                                yield Input(placeholder="2.0", id="settings-batch-delay")
                                 yield Label("sources (comma separated, empty = all)", classes="field-label")
                                 yield Input(placeholder="auth_logs, syslog", id="settings-sources")
                                 yield Checkbox("AI enhancement", id="settings-enhance")
+                                yield Checkbox("Noise filter", id="settings-filter-noise")
                                 yield Button("Save configuration", id="btn-save-settings")
                             with Horizontal(id="knowledge-form"):
                                 yield Input(placeholder="search ATT&CK / CVE", id="knowledge-query")
@@ -936,6 +941,9 @@ class ForensIQApp(App):
                 ("backend url", config.base_url),
                 ("interval", f"{config.interval_seconds}s"),
                 ("max results", str(config.max_results)),
+                ("max batch chars", str(config.max_batch_chars)),
+                ("batch delay", f"{config.batch_delay_seconds:g}s"),
+                ("noise filter", "on" if config.filter_noise else "off"),
                 ("ai enhancement", "on" if config.enhance_with_ai else "off"),
                 ("monitoring type", config.monitoring_type),
                 ("sources", ", ".join(config.sources) or "all available"),
@@ -1025,8 +1033,11 @@ class ForensIQApp(App):
             self.query_one("#settings-url", Input).value = config.base_url
             self.query_one("#settings-interval", Input).value = str(config.interval_seconds)
             self.query_one("#settings-max-results", Input).value = str(config.max_results)
+            self.query_one("#settings-batch-chars", Input).value = str(config.max_batch_chars)
+            self.query_one("#settings-batch-delay", Input).value = f"{config.batch_delay_seconds:g}"
             self.query_one("#settings-sources", Input).value = ", ".join(config.sources)
             self.query_one("#settings-enhance", Checkbox).value = config.enhance_with_ai
+            self.query_one("#settings-filter-noise", Checkbox).value = config.filter_noise
             self._settings_loaded = True
         elif self.view != "settings":
             self._settings_loaded = False
@@ -1266,8 +1277,15 @@ class ForensIQApp(App):
             try:
                 interval = int(self.query_one("#settings-interval", Input).value.strip())
                 max_results = int(self.query_one("#settings-max-results", Input).value.strip())
+                max_batch_chars = int(self.query_one("#settings-batch-chars", Input).value.strip())
             except ValueError as exc:
-                raise ConfigurationError("interval and max results must be whole numbers") from exc
+                raise ConfigurationError(
+                    "interval, max results and max batch chars must be whole numbers"
+                ) from exc
+            try:
+                batch_delay = float(self.query_one("#settings-batch-delay", Input).value.strip())
+            except ValueError as exc:
+                raise ConfigurationError("batch delay must be a number") from exc
             raw_sources = [
                 part.strip()
                 for part in self.query_one("#settings-sources", Input).value.split(",")
@@ -1275,12 +1293,16 @@ class ForensIQApp(App):
             ]
             sources = self.service.collector.validate_sources(raw_sources) if raw_sources else ()
             enhance = self.query_one("#settings-enhance", Checkbox).value
+            filter_noise = self.query_one("#settings-filter-noise", Checkbox).value
             config: ClientConfig = self.service.configure_monitoring(
                 base_url=url,
                 interval_seconds=interval,
                 max_results=max_results,
+                max_batch_chars=max_batch_chars,
+                batch_delay_seconds=batch_delay,
                 sources=tuple(sources),
                 enhance_with_ai=bool(enhance),
+                filter_noise=bool(filter_noise),
             )
         except ForensIQError as exc:
             error_label.update(escape(str(exc)))

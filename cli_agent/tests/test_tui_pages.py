@@ -429,6 +429,7 @@ async def test_monitoring_splits_oversized_batches_without_loss(tmp_path) -> Non
     service = build_service(
         tmp_path,
         transport,
+        config=ClientConfig(max_batch_chars=50_000, batch_delay_seconds=0.0, filter_noise=False),
         batches=[{"auth_logs": [{"message": oversized}]}],
     )
     app = ForensIQApp(service=service, auto_probe=False)

@@ -13,6 +13,7 @@ is what Pydantic's ``max_length`` enforces.
 
 from __future__ import annotations
 
+import re
 from dataclasses import dataclass
 
 # LogAnalysisRequest.logs: Field(..., max_length=50000)
@@ -20,6 +21,72 @@ MAX_LOG_CHARS = 50_000
 # LogAnalysisRequest.max_results: Field(default=5, ge=1, le=20)
 MIN_MAX_RESULTS = 1
 MAX_MAX_RESULTS = 20
+
+# Security-relevant keywords that must never be dropped by the noise filter.
+_SECURITY_SIGNAL_RE = re.compile(
+    r"(?:fail|error|crit|alert|emerg|warn|denied|invalid|refused|sudo|\bsu:|ssh|"
+    r"accepted|auth|shadow|passwd|unauthorized|forbidden|attack|malware|"
+    r"iptables|ufw|audit|segfault|killed|oom|exploit|brute|injection|payload|"
+    r"reverse.?shell|nmap|curl|wget|chmod|chown|crontab|useradd|usermod|groupadd)",
+    re.IGNORECASE,
+)
+
+# Routine OS/daemon chatter that adds high token volume with low security value.
+_BENIGN_NOISE_RE = re.compile(
+    r"(?:"
+    r"systemd(?:\[\d+\])?: (?:Started |Starting |Finished |Stopped |Deactivated successfully|"
+    r"Created slice|Removed slice|Reached target|Consumed |Listening on|Closed )"
+    r"|CRON\[\d+\]: pam_unix\(cron:session\): session (?:opened|closed)"
+    r"|systemd-logind\[\d+\]: (?:New session|Session \d+ logged out|Removed session)"
+    r"|rtkit-daemon\[\d+\]: Successfully (?:made thread|demoted)"
+    r"|dbus-daemon\[\d+\]: \[system\] Successfully activated service"
+    r"|(?:\[DEBUG\]|\bDEBUG\b|\blevel=debug\b)"
+    r")",
+    re.IGNORECASE,
+)
+
+
+def filter_log_noise(text: str) -> tuple[str, int]:
+    """Drop routine benign chatter and exact duplicate lines before batching.
+
+    Lines containing security-relevant keywords are never dropped by the
+    benign-chatter filter. If filtering would empty a non-empty input, falls
+    back to keeping deduplicated non-empty lines so valid cycles are never
+    silently discarded.
+
+    Returns ``(filtered_text, dropped_line_count)``.
+    """
+    if not text or not text.strip():
+        return text, 0
+
+    lines = text.splitlines()
+    deduped: list[str] = []
+    filtered: list[str] = []
+    seen: set[str] = set()
+    dropped = 0
+
+    for line in lines:
+        stripped = line.strip()
+        if not stripped:
+            dropped += 1
+            continue
+        if stripped in seen:
+            dropped += 1
+            continue
+        seen.add(stripped)
+        deduped.append(line)
+
+        if _BENIGN_NOISE_RE.search(stripped) and not _SECURITY_SIGNAL_RE.search(stripped):
+            dropped += 1
+            continue
+        filtered.append(line)
+
+    if not filtered:
+        # Never turn a non-empty log batch into an empty one.
+        fallback_dropped = len(lines) - len(deduped)
+        return "\n".join(deduped), fallback_dropped
+
+    return "\n".join(filtered), dropped
 
 # Retained for callers that still need the old helper.  The monitoring loop no
 # longer uses it: silently dropping data is exactly what Phase 7 removes.

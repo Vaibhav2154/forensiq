@@ -21,15 +21,63 @@ def format_utc_and_ist(evt: NormalizedEvent) -> tuple[str, str]:
     )
 
 
+DEFAULT_MAX_PROMPT_EVENTS = 40
+DEFAULT_MAX_EXCERPT_CHARS = 180
+
+
+def _select_events_for_prompt(
+    events: list[NormalizedEvent],
+    max_events: int,
+) -> tuple[list[NormalizedEvent], int]:
+    """Prioritize security-relevant events when a batch exceeds ``max_events``."""
+    if len(events) <= max_events:
+        return events, 0
+
+    priority_indices = [
+        idx for idx, evt in enumerate(events) if evt.event_type != "system_log_event"
+    ]
+    routine_indices = [
+        idx for idx, evt in enumerate(events) if evt.event_type == "system_log_event"
+    ]
+
+    if len(priority_indices) >= max_events:
+        # Keep head + tail of prioritized events so both initial access and escalation stay visible
+        head = max_events // 2
+        tail = max_events - head
+        chosen = priority_indices[:head] + priority_indices[-tail:]
+    else:
+        remaining = max_events - len(priority_indices)
+        chosen = priority_indices + routine_indices[-remaining:]
+
+    chosen_sorted = sorted(set(chosen))
+    selected = [events[idx] for idx in chosen_sorted]
+    return selected, len(events) - len(selected)
+
+
 def serialize_events_for_prompt(
     events: list[NormalizedEvent],
     raw_log_excerpts: dict[str, str] | None = None,
+    *,
+    max_events: int = DEFAULT_MAX_PROMPT_EVENTS,
+    max_excerpt_chars: int = DEFAULT_MAX_EXCERPT_CHARS,
 ) -> str:
-    """Build a compact, traceable JSON representation of normalized events for sub-agents."""
+    """Build a compact, token-bounded, traceable JSON representation of normalized events."""
     raw_map = raw_log_excerpts or {}
+    selected_events, omitted_count = _select_events_for_prompt(events, max_events)
     payload: list[dict[str, Any]] = []
-    for evt in events:
+    for evt in selected_events:
         utc_str, ist_str = format_utc_and_ist(evt)
+        ev_ref: dict[str, Any] = {
+            "reference_id": evt.evidence_ref.reference_id,
+            "uri": evt.evidence_ref.uri,
+        }
+        if evt.evidence_ref.line_start is not None:
+            ev_ref["line_start"] = evt.evidence_ref.line_start
+        if evt.evidence_ref.line_end is not None:
+            ev_ref["line_end"] = evt.evidence_ref.line_end
+        if evt.evidence_ref.sha256:
+            ev_ref["sha256_prefix"] = evt.evidence_ref.sha256[:16]
+
         item: dict[str, Any] = {
             "event_id": evt.event_id,
             "scope_key": evt.scope_key,
@@ -37,20 +85,23 @@ def serialize_events_for_prompt(
             "event_time_ist": ist_str,
             "event_type": evt.event_type,
             "source": evt.source,
-            "features": evt.features,
-            "evidence_ref": {
-                "reference_id": evt.evidence_ref.reference_id,
-                "uri": evt.evidence_ref.uri,
-                "line_start": evt.evidence_ref.line_start,
-                "line_end": evt.evidence_ref.line_end,
-                "sha256_prefix": (evt.evidence_ref.sha256 or "")[:16],
-            },
+            "evidence_ref": ev_ref,
         }
+        if evt.features:
+            item["features"] = evt.features
         raw_line = raw_map.get(evt.evidence_ref.reference_id)
         if raw_line:
-            item["raw_excerpt"] = raw_line[:400]
+            item["raw_excerpt"] = raw_line[:max_excerpt_chars]
         payload.append(item)
-    return json.dumps(payload, indent=2)
+
+    serialized = json.dumps(payload, separators=(",", ":"))
+    if omitted_count > 0:
+        serialized += (
+            f"\n[Note: Showing {len(selected_events)} prioritized events out of "
+            f"{len(events)} total normalized events ({omitted_count} routine events omitted "
+            "from LLM context; all events were processed by KCP and LSTM).]"
+        )
+    return serialized
 
 
 def serialize_knowledge_catalog_for_prompt(
@@ -65,7 +116,7 @@ def serialize_knowledge_catalog_for_prompt(
     for src_key, rec in knowledge_catalog.items():
         content = rec.content or {}
         related_summary = []
-        for rel in rel_map.get(src_key.upper(), [])[:6]:
+        for rel in rel_map.get(src_key.upper(), [])[:4]:
             rc = rel.content or {}
             related_summary.append(
                 {
@@ -74,24 +125,25 @@ def serialize_knowledge_catalog_for_prompt(
                     "name": rc.get("name") or rc.get("title") or rel.source_id,
                 }
             )
-        payload.append(
-            {
-                "record_id": rec.record_id,
-                "source_type": rec.source_type,
-                "source_id": rec.source_id,
-                "source_version": rec.source_version,
-                "name": content.get("name") or content.get("title") or rec.source_id,
-                "summary": str(content.get("summary") or content.get("description") or "")[:360],
-                "tactics": content.get("tactics", []),
-                "platforms": content.get("platforms", []),
-                "severity": content.get("severity"),
-                "retrieval_score": round(float(scores.get(src_key.upper(), 0.0)), 4),
-                "is_evidence_proof": False,
-                "provenance_uri": (rec.provenance or {}).get("source_uri", ""),
-                "related_records": related_summary,
-            }
-        )
-    return json.dumps(payload, indent=2)
+        item: dict[str, Any] = {
+            "record_id": rec.record_id,
+            "source_type": rec.source_type,
+            "source_id": rec.source_id,
+            "source_version": rec.source_version,
+            "name": content.get("name") or content.get("title") or rec.source_id,
+            "summary": str(content.get("summary") or content.get("description") or "")[:240],
+            "tactics": content.get("tactics", []),
+            "platforms": content.get("platforms", []),
+            "retrieval_score": round(float(scores.get(src_key.upper(), 0.0)), 4),
+            "is_evidence_proof": False,
+            "provenance_uri": (rec.provenance or {}).get("source_uri", ""),
+        }
+        if content.get("severity") is not None:
+            item["severity"] = content.get("severity")
+        if related_summary:
+            item["related_records"] = related_summary
+        payload.append(item)
+    return json.dumps(payload, separators=(",", ":"))
 
 
 def serialize_sequence_cues_for_prompt(cues: list[SequenceCue]) -> str:
@@ -108,7 +160,7 @@ def serialize_sequence_cues_for_prompt(cues: list[SequenceCue]) -> str:
         }
         for c in cues
     ]
-    return json.dumps(payload, indent=2)
+    return json.dumps(payload, separators=(",", ":"))
 
 
 # ---------------------------------------------------------------------------
