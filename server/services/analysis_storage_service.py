@@ -184,6 +184,138 @@ class AnalysisStorageService:
         except Exception as e:
             logger.error(f"Failed to decrypt analysis {analysis_id}: {e}")
             return None
+
+    async def update_remediation_status(
+        self,
+        user_id: str,
+        *,
+        recommendation_id: str,
+        execution_status: str,
+        analysis_id: Optional[str] = None,
+        investigation_id: Optional[str] = None,
+        receipt_id: Optional[str] = None,
+        executed_by: Optional[str] = None,
+        notes: Optional[str] = None,
+    ) -> Optional[Dict[str, Any]]:
+        """Persist a HITL TUI remediation status update inside the user's encrypted analysis."""
+        try:
+            user_doc = await database.get_collection("user_collection").find_one({"username": user_id})
+            if not user_doc or not user_doc.get("hashed_password"):
+                logger.error(f"User {user_id} or hashed_password not found for remediation sync")
+                return None
+            hashed_password = user_doc["hashed_password"]
+
+            target_doc = None
+            resolved_analysis_id: Optional[str] = None
+            decrypted: Optional[Dict[str, Any]] = None
+
+            if analysis_id:
+                if not ObjectId.is_valid(analysis_id):
+                    return None
+                doc = await self.collection.find_one(
+                    {"user_id": user_id, "_id": ObjectId(analysis_id)}
+                )
+                if doc:
+                    target_doc = doc
+                    resolved_analysis_id = str(doc["_id"])
+                    decrypted = encryption_service.decrypt_analysis_results(
+                        encrypted_data={
+                            "summary": doc.get("encrypted_summary"),
+                            "techniques": doc.get("encrypted_techniques"),
+                            "enhanced_analysis": doc.get("encrypted_enhanced_analysis"),
+                            "investigation": doc.get("encrypted_investigation"),
+                        },
+                        hashed_password=hashed_password,
+                    )
+            elif investigation_id:
+                cursor = (
+                    self.collection.find({"user_id": user_id})
+                    .sort("analysis_timestamp", -1)
+                    .limit(25)
+                )
+                async for doc in cursor:
+                    cand = encryption_service.decrypt_analysis_results(
+                        encrypted_data={
+                            "summary": doc.get("encrypted_summary"),
+                            "techniques": doc.get("encrypted_techniques"),
+                            "enhanced_analysis": doc.get("encrypted_enhanced_analysis"),
+                            "investigation": doc.get("encrypted_investigation"),
+                        },
+                        hashed_password=hashed_password,
+                    )
+                    inv = cand.get("investigation")
+                    if isinstance(inv, dict) and inv.get("investigation_id") == investigation_id:
+                        target_doc = doc
+                        resolved_analysis_id = str(doc["_id"])
+                        decrypted = cand
+                        break
+
+            if target_doc is None or decrypted is None or resolved_analysis_id is None:
+                return None
+
+            investigation = decrypted.get("investigation")
+            if not isinstance(investigation, dict):
+                return None
+
+            recommendations = investigation.get("recommendations")
+            if not isinstance(recommendations, list):
+                return None
+
+            matched = False
+            for rec in recommendations:
+                if isinstance(rec, dict) and rec.get("recommendation_id") == recommendation_id:
+                    rec["execution_status"] = execution_status
+                    matched = True
+                    break
+
+            if not matched:
+                return None
+
+            recorded_at = datetime.utcnow().isoformat() + "Z"
+            history = investigation.get("remediation_history")
+            if not isinstance(history, list):
+                history = []
+                investigation["remediation_history"] = history
+            history.append(
+                {
+                    "recommendation_id": recommendation_id,
+                    "execution_status": execution_status,
+                    "receipt_id": receipt_id,
+                    "executed_by": executed_by or user_id,
+                    "notes": notes,
+                    "recorded_at": recorded_at,
+                }
+            )
+
+            encrypted_results, _ = encryption_service.encrypt_analysis_results(
+                summary=decrypted.get("summary") or "",
+                techniques=decrypted.get("techniques") or [],
+                enhanced_analysis=decrypted.get("enhanced_analysis"),
+                hashed_password=hashed_password,
+                investigation=investigation,
+            )
+
+            await self.collection.update_one(
+                {"_id": target_doc["_id"], "user_id": user_id},
+                {
+                    "$set": {
+                        "encrypted_investigation": encrypted_results.get("investigation"),
+                        "remediation_updated_at": datetime.utcnow(),
+                    }
+                },
+            )
+
+            return {
+                "analysis_id": resolved_analysis_id,
+                "investigation_id": investigation.get("investigation_id"),
+                "recommendation_id": recommendation_id,
+                "execution_status": execution_status,
+                "receipt_id": receipt_id,
+                "recorded_at": recorded_at,
+            }
+        except Exception as e:
+            logger.error(f"Failed to update remediation status: {e}")
+            raise
     
     async def get_user_analysis_history(self, user_id: str, limit: int = 50, offset: int = 0) -> List[Dict[str, Any]]:
         """Get user analysis history (metadata only)."""

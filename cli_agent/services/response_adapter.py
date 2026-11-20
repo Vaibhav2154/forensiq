@@ -52,6 +52,7 @@ class AnalysisView:
     processing_time_ms: float | None = None
     threat_level: str | None = None
     threat_level_source: str = "unavailable"
+    analysis_id: str | None = None
     raw: Mapping[str, Any] = field(default_factory=dict, repr=False)
 
     @property
@@ -82,6 +83,7 @@ def adapt_analysis(payload: Any) -> AnalysisView:
         processing_time_ms=_optional_float(payload.get("processing_time_ms")),
         threat_level=level,
         threat_level_source=source,
+        analysis_id=_optional_text(payload.get("id")),
         raw=payload,
     )
 

@@ -17,18 +17,23 @@ from services.investigation.models import (
     EntityRelationship,
     EventAnalysisOutput,
     EvidenceObservation,
+    FixTier,
     InvestigationFinding,
     InvestigationResult,
     KnowledgeEnrichmentOutput,
     ObservedIOC,
     OrchestratorReviewOutput,
+    PlaybookId,
     RecommendationItem,
     RecommendationOutput,
+    RemediationAuditEvent,
+    RemediationStatus,
     ReviewIssue,
     SequenceAnalysisOutput,
     SequenceCueReview,
     TimelineEntry,
 )
+from services.investigation.playbook_tagger import tag_recommendations_for_tui
 from services.investigation.service import (
     InvestigationService,
     SequenceCueProvider,

@@ -12,6 +12,7 @@ from pathlib import Path
 from typing import Any
 from urllib.parse import urlencode
 
+from ..remediation import RemediationEngine
 from .api_client import ApiClient, Transport
 from .auth_service import AuthService, Session, TokenStore
 from .collector_service import (
@@ -33,6 +34,7 @@ KNOWLEDGE_STATS_ENDPOINT = "/api/v1/knowledge/stats"
 KNOWLEDGE_SEARCH_ENDPOINT = "/api/v1/knowledge/search"
 LATEST_ANALYSIS_ENDPOINT = "/api/v1/latest"
 HISTORY_ENDPOINT = "/api/v1/history"
+INVESTIGATIONS_ENDPOINT = "/api/v1/investigations"
 
 
 class CliService:
@@ -47,6 +49,7 @@ class CliService:
         collector: CollectorService | None = None,
         config: ClientConfig | None = None,
         outbox: Outbox | None = None,
+        remediation: RemediationEngine | None = None,
     ) -> None:
         self.config_service = config_service or ConfigService()
         self.config_error: str | None = None
@@ -82,6 +85,9 @@ class CliService:
                 else None
             )
         self.outbox = outbox
+        self.remediation = remediation or RemediationEngine(
+            backend_base_url=self.config.base_url
+        )
         self._monitoring: MonitoringService | None = None
 
     # -- session ---------------------------------------------------------
@@ -94,6 +100,7 @@ class CliService:
         if base_url and base_url.rstrip("/") != self.config.base_url:
             self.config = self.config_service.update(base_url=base_url.rstrip("/"))
             self.api.base_url = self.config.base_url
+            self.remediation.set_backend_url(self.config.base_url)
         return await self.auth.login(username, password)
 
     def logout(self) -> None:
@@ -195,6 +202,41 @@ class CliService:
         payload = await self.api.request("GET", f"{HISTORY_ENDPOINT}?{query}")
         return [row for row in payload if isinstance(row, dict)] if isinstance(payload, list) else []
 
+    async def sync_remediation_status(
+        self,
+        recommendation_id: str,
+        execution_status: str,
+        *,
+        analysis_id: str | None = None,
+        investigation_id: str | None = None,
+        receipt_id: str | None = None,
+        executed_by: str | None = None,
+        notes: str | None = None,
+    ) -> dict[str, Any] | None:
+        """Report local HITL execution/rejection/rollback status back to the backend."""
+        if not self.is_authenticated:
+            return None
+        if analysis_id:
+            path = f"{HISTORY_ENDPOINT}/{analysis_id}/remediation-status"
+        elif investigation_id:
+            path = f"{INVESTIGATIONS_ENDPOINT}/{investigation_id}/remediation-status"
+        else:
+            return None
+        body: dict[str, Any] = {
+            "recommendation_id": recommendation_id,
+            "execution_status": execution_status,
+        }
+        if receipt_id:
+            body["receipt_id"] = receipt_id
+        if executed_by:
+            body["executed_by"] = executed_by
+        if notes:
+            body["notes"] = notes
+        if analysis_id:
+            body["analysis_id"] = analysis_id
+        payload = await self.api.request("POST", path, json_body=body)
+        return payload if isinstance(payload, dict) else None
+
     # -- collector -------------------------------------------------------
     def collector_summary(self) -> dict[str, Any]:
         """Platform summary plus configured sources, without raising at the UI."""
@@ -222,6 +264,7 @@ class CliService:
         self.config = updated
         self.config_error = None
         self.api.base_url = updated.base_url
+        self.remediation.set_backend_url(updated.base_url)
         return updated
 
     def _monitoring_active(self) -> bool:

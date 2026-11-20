@@ -194,8 +194,8 @@ async def test_layout_ids_survive(tmp_path) -> None:
         ):
             assert app.query(selector), f"missing {selector}"
         assert len(app.query(".card")) == 4
-        assert len(app.query(ListItem)) == 6
-        assert len(app.query("ListView ListItem")) == 6
+        assert len(app.query(ListItem)) == 7
+        assert len(app.query("ListView ListItem")) == 7
 
 
 def test_shortcuts_are_preserved_and_only_extended() -> None:
@@ -204,7 +204,7 @@ def test_shortcuts_are_preserved_and_only_extended() -> None:
     preview_keys = {binding[0] for binding in ForensIQPreview.BINDINGS}
     app_keys = {binding[0] for binding in ForensIQApp.BINDINGS}
     assert preview_keys <= app_keys
-    assert app_keys - preview_keys == {"l", "o"}, "unexpected extra shortcut"
+    assert app_keys - preview_keys == {"l", "o", "7", "a", "d", "r", "u"}, "unexpected extra shortcut"
 
 
 def test_preview_baseline_is_still_the_mock_shell() -> None:

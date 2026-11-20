@@ -18,6 +18,12 @@ from dataclasses import dataclass, field
 from datetime import datetime, timezone
 from typing import Any, Deque
 
+from ..remediation.models import (
+    CommandOrDiffPreview,
+    ExecutionReceipt,
+    PreflightReport,
+    RemediationItemView,
+)
 from ..services.response_adapter import AnalysisView
 
 MAX_EVENTS = 200
@@ -107,6 +113,14 @@ class AppState:
     analysis_status: str = "empty"  # empty | loaded | unavailable
     analysis_error: str | None = None
 
+    remediation_items: list[RemediationItemView] = field(default_factory=list)
+    selected_remediation_index: int = 0
+    remediation_preflight: dict[str, PreflightReport] = field(default_factory=dict)
+    remediation_previews: dict[str, CommandOrDiffPreview] = field(default_factory=dict)
+    remediation_journal: list[ExecutionReceipt] = field(default_factory=list)
+    remediation_status: str = "empty"  # empty | loaded | unavailable
+    remediation_error: str | None = None
+
     sessions: list[dict[str, Any]] = field(default_factory=list)
     sessions_status: str = "unknown"  # unknown | loaded | error
     sessions_error: str | None = None
@@ -166,10 +180,24 @@ class AppState:
         if record.submitted:
             self.submitted += 1
 
+    @property
+    def pending_fixable_count(self) -> int:
+        return sum(
+            1
+            for item in self.remediation_items
+            if item.is_executable_locally and item.execution_status == "pending_approval"
+        )
+
     def clear_analysis(self) -> None:
         self.latest_analysis = None
         self.analysis_status = "empty"
         self.analysis_error = None
+        self.remediation_items = []
+        self.selected_remediation_index = 0
+        self.remediation_preflight.clear()
+        self.remediation_previews.clear()
+        self.remediation_status = "empty"
+        self.remediation_error = None
 
     def reset_for_logout(self) -> None:
         self.authenticated = False

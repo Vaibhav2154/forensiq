@@ -8,6 +8,8 @@ from model.logs_model import (
     AnalysisChatRequest,
     HistoryChatRequest,
     AnalysisChatResponse,
+    RemediationStatusUpdateRequest,
+    RemediationStatusUpdateResponse,
 )
 from model.analysis_model import AnalysisHistoryItem, UserAnalyticsStats
 from services import GeminiService
@@ -470,6 +472,39 @@ async def chat_about_stored_analysis(
         raise HTTPException(
             status_code=500,
             detail=f"Failed to chat about stored analysis: {str(e)}",
+        )
+
+
+@router.post("/history/{analysis_id}/remediation-status", response_model=RemediationStatusUpdateResponse)
+async def sync_history_remediation_status(
+    analysis_id: str,
+    payload: RemediationStatusUpdateRequest,
+    current_user: dict = Depends(get_current_user),
+) -> RemediationStatusUpdateResponse:
+    """Persist HITL TUI remediation approval, execution, rejection, or rollback into encrypted storage."""
+    try:
+        updated = await analysis_storage_service.update_remediation_status(
+            user_id=current_user["username"],
+            analysis_id=analysis_id,
+            recommendation_id=payload.recommendation_id,
+            execution_status=payload.execution_status,
+            receipt_id=payload.receipt_id,
+            executed_by=payload.executed_by,
+            notes=payload.notes,
+        )
+        if not updated:
+            raise HTTPException(
+                status_code=404,
+                detail="Stored analysis or recommendation_id not found",
+            )
+        return RemediationStatusUpdateResponse(**updated)
+    except HTTPException:
+        raise
+    except Exception as e:
+        logger.error(f"Error syncing remediation status for {analysis_id}: {str(e)}")
+        raise HTTPException(
+            status_code=500,
+            detail=f"Failed to sync remediation status: {str(e)}",
         )
 
 @router.get("/history/{analysis_id}", response_model=LogAnalysisResponse)
