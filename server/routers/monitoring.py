@@ -200,28 +200,6 @@ async def store_analysis_result(
         logger.error(f"Failed to store analysis: {e}")
         raise HTTPException(status_code=500, detail=str(e))
 
-@router.get("/analysis/{analysis_id}", response_model=Dict[str, Any])
-async def get_analysis_result(
-    analysis_id: str,
-    current_user: dict = Depends(get_current_user)
-):
-    """Retrieve stored analysis result."""
-    try:
-        user_id = current_user.get('username')
-        
-        analysis = await storage_service.get_analysis_result(user_id, analysis_id)
-        
-        if not analysis:
-            raise HTTPException(status_code=404, detail="Analysis not found")
-        
-        return analysis
-        
-    except HTTPException:
-        raise
-    except Exception as e:
-        logger.error(f"Failed to retrieve analysis: {e}")
-        raise HTTPException(status_code=500, detail="Failed to retrieve analysis")
-
 @router.get("/analysis/user/history", response_model=List[Dict[str, Any]])
 async def get_user_analysis_history(
     limit: int = 50,
@@ -252,6 +230,28 @@ async def get_analysis_statistics(
     except Exception as e:
         logger.error(f"Failed to retrieve analysis statistics: {e}")
         raise HTTPException(status_code=500, detail="Failed to retrieve statistics")
+
+@router.get("/analysis/{analysis_id}", response_model=Dict[str, Any])
+async def get_analysis_result(
+    analysis_id: str,
+    current_user: dict = Depends(get_current_user)
+):
+    """Retrieve stored analysis result."""
+    try:
+        user_id = current_user.get('username')
+        
+        analysis = await storage_service.get_analysis_result(user_id, analysis_id)
+        
+        if not analysis:
+            raise HTTPException(status_code=404, detail="Analysis not found")
+        
+        return analysis
+        
+    except HTTPException:
+        raise
+    except Exception as e:
+        logger.error(f"Failed to retrieve analysis: {e}")
+        raise HTTPException(status_code=500, detail="Failed to retrieve analysis")
 
 @router.delete("/analysis/cleanup")
 async def cleanup_old_analyses(

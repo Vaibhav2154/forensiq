@@ -433,27 +433,46 @@ class AnalysisStorageService:
     async def get_analysis_stats(self, days: int = 30) -> Dict[str, Any]:
         """Get analysis statistics."""
         try:
-            since_date = datetime.utcnow() - timedelta(days=days)
-            
-            total_analyses = await self.collection.count_documents({
-                "analysis_timestamp": {"$gte": since_date}
+            now = datetime.utcnow()
+            since_date = now - timedelta(days=days)
+            start_of_day = now.replace(hour=0, minute=0, second=0, microsecond=0)
+
+            period_query = {"analysis_timestamp": {"$gte": since_date}}
+            total_analyses = await self.collection.count_documents(period_query)
+            analyses_today = await self.collection.count_documents({
+                "analysis_timestamp": {"$gte": start_of_day}
             })
-            
+            unique_users_list = await self.collection.distinct("user_id", period_query)
+            unique_users = len(unique_users_list)
+
+            avg_pipeline = [
+                {"$match": period_query},
+                {"$group": {"_id": None, "avg_time": {"$avg": "$processing_time_ms"}}},
+            ]
+            avg_docs = await self.collection.aggregate(avg_pipeline).to_list(1)
+            avg_processing_time = float(avg_docs[0].get("avg_time") or 0.0) if avg_docs else 0.0
+
             active_sessions = await self.sessions_collection.count_documents({
                 "status": "active"
             })
-            
+
             return {
                 "total_analyses": total_analyses,
+                "analyses_today": analyses_today,
+                "unique_users": unique_users,
+                "average_processing_time": round(avg_processing_time, 2),
                 "active_sessions": active_sessions,
-                "period_days": days
+                "period_days": days,
             }
         except Exception as e:
             logger.error(f"Failed to get analysis stats: {e}")
             return {
                 "total_analyses": 0,
+                "analyses_today": 0,
+                "unique_users": 0,
+                "average_processing_time": 0.0,
                 "active_sessions": 0,
-                "period_days": days
+                "period_days": days,
             }
 
     async def delete_analysis_result(self, user_id: str, analysis_id: str) -> bool:
